@@ -1,0 +1,228 @@
+<% var pageTitle = 'Users'; %>
+<%- include('partials/header') %>
+
+<div class="page-header">
+  <h1>User Management</h1>
+  <p class="page-subtitle"><%= pagination.totalItems.toLocaleString() %> total users</p>
+</div>
+
+<!-- Filters -->
+<div class="toolbar">
+  <form action="/admin/users" method="GET" class="toolbar-search">
+    <div class="input-with-icon">
+      <i class="fas fa-search"></i>
+      <input type="text" name="search" value="<%= search %>" placeholder="Search by name or email...">
+    </div>
+    <input type="hidden" name="filter" value="<%= filter %>">
+    <button type="submit" class="btn btn-primary btn-sm">Search</button>
+  </form>
+
+  <div class="toolbar-filters">
+    <a href="/admin/users?filter=all&search=<%= search %>" class="filter-chip <%= filter === 'all' ? 'active' : '' %>">All</a>
+    <a href="/admin/users?filter=premium&search=<%= search %>" class="filter-chip <%= filter === 'premium' ? 'active' : '' %>">Premium</a>
+    <a href="/admin/users?filter=banned&search=<%= search %>" class="filter-chip <%= filter === 'banned' ? 'active' : '' %>">Banned</a>
+    <a href="/admin/users?filter=admin&search=<%= search %>" class="filter-chip <%= filter === 'admin' ? 'active' : '' %>">Admin</a>
+  </div>
+</div>
+
+<!-- Users Table -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Email</th>
+          <th>Recipes</th>
+          <th>Followers</th>
+          <th>Status</th>
+          <th>Joined</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% users.forEach(function(user) { %>
+        <tr data-user-id="<%= user._id %>">
+          <td>
+            <div class="user-cell">
+              <% if (user.profilePicture) { %>
+                <img src="<%= user.profilePicture %>" alt="" class="avatar-sm">
+              <% } else { %>
+                <div class="avatar-sm avatar-placeholder">
+                  <%= user.fullName.charAt(0).toUpperCase() %>
+                </div>
+              <% } %>
+              <span><%= user.fullName %></span>
+            </div>
+          </td>
+          <td class="text-muted"><%= user.email %></td>
+          <td><%= user.recipesCount %></td>
+          <td><%= user.followersCount %></td>
+          <td>
+            <div class="badge-group">
+              <% if (user.isPremium) { %>
+                <span class="badge badge-premium"><i class="fas fa-crown"></i> Premium</span>
+              <% } %>
+              <% if (user.isBanned) { %>
+                <span class="badge badge-danger">Banned</span>
+              <% } %>
+              <% if (user.isAdmin) { %>
+                <span class="badge badge-info">Admin</span>
+              <% } %>
+              <% if (!user.isPremium && !user.isBanned && !user.isAdmin) { %>
+                <span class="badge badge-default">Free</span>
+              <% } %>
+            </div>
+          </td>
+          <td class="text-muted"><%= new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></td>
+          <td>
+            <div class="action-buttons">
+              <button class="btn btn-sm btn-secondary" onclick="viewUser('<%= user._id %>')" aria-label="View user details">
+                <i class="fas fa-eye"></i>
+              </button>
+              <% if (!user.isBanned) { %>
+                <button class="btn btn-sm btn-danger-outline" onclick="showBanModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Ban user">
+                  <i class="fas fa-ban"></i>
+                </button>
+              <% } else { %>
+                <button class="btn btn-sm btn-success-outline" onclick="unbanUser('<%= user._id %>')" aria-label="Unban user">
+                  <i class="fas fa-check-circle"></i>
+                </button>
+              <% } %>
+            </div>
+          </td>
+        </tr>
+        <% }); %>
+        <% if (users.length === 0) { %>
+        <tr>
+          <td colspan="7" class="empty-state">
+            <i class="fas fa-search"></i>
+            <span>No users found</span>
+          </td>
+        </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination -->
+<% if (pagination.total > 1) { %>
+  <%- include('partials/pagination', { pagination, baseUrl: '/admin/users?filter=' + filter + '&search=' + search }) %>
+<% } %>
+
+<!-- User Detail Modal -->
+<div class="modal" id="user-detail-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>User Details</h2>
+      <button class="modal-close" onclick="closeModal('user-detail-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="user-detail-body">
+      <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+    </div>
+  </div>
+</div>
+
+<!-- Ban Modal -->
+<div class="modal" id="ban-modal">
+  <div class="modal-content modal-sm">
+    <div class="modal-header">
+      <h2>Ban User</h2>
+      <button class="modal-close" onclick="closeModal('ban-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Are you sure you want to ban <strong id="ban-user-name"></strong>?</p>
+      <div class="form-group">
+        <label for="ban-reason">Reason</label>
+        <textarea id="ban-reason" rows="3" placeholder="Reason for ban (visible to admins only)..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('ban-modal')">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ban-btn" onclick="confirmBan()">Ban User</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let banUserId = null;
+
+  function viewUser(id) {
+    openModal('user-detail-modal');
+    document.getElementById('user-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    fetch('/admin/api/users/' + id)
+      .then(r => r.json())
+      .then(data => {
+        const u = data.user;
+        document.getElementById('user-detail-body').innerHTML = `
+          <div class="detail-grid">
+            <div class="detail-header">
+              ${u.profilePicture ? `<img src="${esc(u.profilePicture)}" alt="" class="avatar-lg">` : `<div class="avatar-lg avatar-placeholder">${esc(u.fullName).charAt(0).toUpperCase()}</div>`}
+              <div>
+                <h3>${esc(u.fullName)}</h3>
+                <p class="text-muted">${esc(u.email)}</p>
+              </div>
+            </div>
+            <div class="detail-stats">
+              <div class="detail-stat"><strong>${Number(u.recipesCount) || 0}</strong> Recipes</div>
+              <div class="detail-stat"><strong>${Number(u.followersCount) || 0}</strong> Followers</div>
+              <div class="detail-stat"><strong>${Number(u.followingCount) || 0}</strong> Following</div>
+            </div>
+            ${u.bio ? `<div class="detail-section"><h4>Bio</h4><p>${esc(u.bio)}</p></div>` : ''}
+            <div class="detail-section">
+              <h4>Account Info</h4>
+              <div class="detail-row"><span>Profile:</span> <span>${u.isPublic ? 'Public' : 'Private'}</span></div>
+              <div class="detail-row"><span>Premium:</span> <span>${u.isPremium ? 'Yes (' + esc(u.premiumPlan || 'active') + ')' : 'No'}</span></div>
+              <div class="detail-row"><span>Status:</span> <span>${u.isBanned ? '<span class="badge badge-danger">Banned</span>' : '<span class="badge badge-success">Active</span>'}</span></div>
+              <div class="detail-row"><span>Joined:</span> <span>${new Date(u.createdAt).toLocaleDateString()}</span></div>
+              <div class="detail-row"><span>Last Active:</span> <span>${u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleDateString() : 'N/A'}</span></div>
+            </div>
+            ${u.dietaryPreferences?.length ? `<div class="detail-section"><h4>Dietary Preferences</h4><div class="tag-list">${u.dietaryPreferences.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</div></div>` : ''}
+            ${u.cuisinePreferences?.length ? `<div class="detail-section"><h4>Cuisine Preferences</h4><div class="tag-list">${u.cuisinePreferences.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</div></div>` : ''}
+          </div>
+        `;
+      })
+      .catch(() => {
+        document.getElementById('user-detail-body').innerHTML = '<p class="text-error">Failed to load user details.</p>';
+      });
+  }
+
+  function showBanModal(id, name) {
+    banUserId = id;
+    document.getElementById('ban-user-name').textContent = name;
+    document.getElementById('ban-reason').value = '';
+    openModal('ban-modal');
+  }
+
+  function confirmBan() {
+    if (!banUserId) return;
+    const reason = document.getElementById('ban-reason').value;
+    fetch('/admin/api/users/' + banUserId + '/ban', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    })
+    .then(r => r.json())
+    .then(() => {
+      closeModal('ban-modal');
+      toastAndReload('User banned successfully');
+    })
+    .catch(() => showToast('Failed to ban user', 'error'));
+  }
+
+  function unbanUser(id) {
+    if (!confirm('Are you sure you want to unban this user?')) return;
+    fetch('/admin/api/users/' + id + '/unban', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(() => {
+      toastAndReload('User unbanned successfully');
+    })
+    .catch(() => showToast('Failed to unban user', 'error'));
+  }
+</script>
+
+<%- include('partials/footer') %>

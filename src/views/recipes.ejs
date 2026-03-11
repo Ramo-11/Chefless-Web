@@ -1,0 +1,201 @@
+<% var pageTitle = 'Recipes'; %>
+<%- include('partials/header') %>
+
+<div class="page-header">
+  <h1>Recipe Moderation</h1>
+  <p class="page-subtitle"><%= pagination.totalItems %> recipes found</p>
+</div>
+
+<!-- Filters -->
+<div class="toolbar">
+  <form action="/admin/recipes" method="GET" class="toolbar-search">
+    <div class="input-with-icon">
+      <i class="fas fa-search"></i>
+      <input type="text" name="search" value="<%= search %>" placeholder="Search recipes by title...">
+    </div>
+    <input type="hidden" name="filter" value="<%= filter %>">
+    <button type="submit" class="btn btn-primary btn-sm">Search</button>
+  </form>
+
+  <div class="toolbar-filters">
+    <a href="/admin/recipes?filter=reported&search=<%= search %>" class="filter-chip <%= filter === 'reported' ? 'active' : '' %>">
+      <i class="fas fa-flag"></i> Reported
+    </a>
+    <a href="/admin/recipes?filter=hidden&search=<%= search %>" class="filter-chip <%= filter === 'hidden' ? 'active' : '' %>">
+      <i class="fas fa-eye-slash"></i> Hidden
+    </a>
+    <a href="/admin/recipes?filter=all&search=<%= search %>" class="filter-chip <%= filter === 'all' ? 'active' : '' %>">
+      All
+    </a>
+  </div>
+</div>
+
+<!-- Recipes Table -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Recipe</th>
+          <th>Author</th>
+          <th>Reports</th>
+          <th>Engagement</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% recipes.forEach(function(recipe) { %>
+        <tr>
+          <td>
+            <div class="recipe-cell">
+              <% if (recipe.photos && recipe.photos.length > 0) { %>
+                <img src="<%= recipe.photos[0] %>" alt="" class="recipe-thumb">
+              <% } else { %>
+                <div class="recipe-thumb recipe-thumb-placeholder"><i class="fas fa-image"></i></div>
+              <% } %>
+              <span class="recipe-title"><%= recipe.title %></span>
+            </div>
+          </td>
+          <td class="text-muted"><%= recipe.authorId ? recipe.authorId.fullName : 'Unknown' %></td>
+          <td>
+            <% if (recipe.reportsCount > 0) { %>
+              <span class="badge badge-danger"><%= recipe.reportsCount %> reports</span>
+            <% } else { %>
+              <span class="text-muted">0</span>
+            <% } %>
+          </td>
+          <td>
+            <span class="text-muted">
+              <i class="fas fa-heart"></i> <%= recipe.likesCount %>
+              &nbsp;
+              <i class="fas fa-code-branch"></i> <%= recipe.forksCount %>
+            </span>
+          </td>
+          <td>
+            <div class="badge-group">
+              <% if (recipe.isHidden) { %>
+                <span class="badge badge-warning">Hidden</span>
+              <% } %>
+              <% if (recipe.isPrivate) { %>
+                <span class="badge badge-default">Private</span>
+              <% } %>
+              <% if (!recipe.isHidden && !recipe.isPrivate) { %>
+                <span class="badge badge-success">Visible</span>
+              <% } %>
+            </div>
+          </td>
+          <td class="text-muted"><%= new Date(recipe.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %></td>
+          <td>
+            <div class="action-buttons">
+              <button class="btn btn-sm btn-secondary" onclick="viewRecipe('<%= recipe._id %>')" aria-label="View recipe">
+                <i class="fas fa-eye"></i>
+              </button>
+              <button class="btn btn-sm <%= recipe.isHidden ? 'btn-success-outline' : 'btn-warning-outline' %>"
+                      onclick="toggleHide('<%= recipe._id %>')"
+                      aria-label="<%= recipe.isHidden ? 'Show' : 'Hide' %> recipe">
+                <i class="fas fa-<%= recipe.isHidden ? 'eye' : 'eye-slash' %>"></i>
+              </button>
+              <button class="btn btn-sm btn-danger-outline" data-id="<%= recipe._id %>" data-title="<%= recipe.title %>" onclick="deleteRecipe(this.dataset.id, this.dataset.title)" aria-label="Delete recipe">
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+        <% }); %>
+        <% if (recipes.length === 0) { %>
+        <tr>
+          <td colspan="7" class="empty-state">
+            <i class="fas fa-check-circle"></i>
+            <span>No recipes match this filter</span>
+          </td>
+        </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<% if (pagination.total > 1) { %>
+  <%- include('partials/pagination', { pagination, baseUrl: '/admin/recipes?filter=' + filter + '&search=' + search }) %>
+<% } %>
+
+<!-- Recipe Detail Modal -->
+<div class="modal" id="recipe-detail-modal">
+  <div class="modal-content modal-lg">
+    <div class="modal-header">
+      <h2>Recipe Details</h2>
+      <button class="modal-close" onclick="closeModal('recipe-detail-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="recipe-detail-body">
+      <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function viewRecipe(id) {
+    openModal('recipe-detail-modal');
+    document.getElementById('recipe-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    fetch('/admin/api/recipes/' + id)
+      .then(r => r.json())
+      .then(data => {
+        const r = data.recipe;
+        const author = r.authorId || {};
+        document.getElementById('recipe-detail-body').innerHTML = `
+          <div class="detail-grid">
+            ${r.photos?.length ? `<div class="recipe-photos">${r.photos.map(p => `<img src="${esc(p)}" alt="" class="recipe-photo">`).join('')}</div>` : ''}
+            <h3>${esc(r.title)}</h3>
+            <p class="text-muted">by ${esc(author.fullName || 'Unknown')} (${esc(author.email || '')})</p>
+            ${r.description ? `<p>${esc(r.description)}</p>` : ''}
+            <div class="detail-section">
+              <h4>Stats</h4>
+              <div class="detail-row"><span>Likes:</span> <span>${Number(r.likesCount) || 0}</span></div>
+              <div class="detail-row"><span>Forks:</span> <span>${Number(r.forksCount) || 0}</span></div>
+              <div class="detail-row"><span>Reports:</span> <span>${Number(r.reportsCount) || 0}</span></div>
+              <div class="detail-row"><span>Servings:</span> <span>${Number(r.baseServings) || 0}</span></div>
+              ${r.prepTime ? `<div class="detail-row"><span>Prep Time:</span> <span>${Number(r.prepTime)} min</span></div>` : ''}
+              ${r.cookTime ? `<div class="detail-row"><span>Cook Time:</span> <span>${Number(r.cookTime)} min</span></div>` : ''}
+            </div>
+            ${r.ingredients?.length ? `
+              <div class="detail-section">
+                <h4>Ingredients (${r.ingredients.length})</h4>
+                <ul class="ingredient-list">${r.ingredients.map(i => `<li>${esc(i.quantity)} ${esc(i.unit)} ${esc(i.name)}</li>`).join('')}</ul>
+              </div>
+            ` : ''}
+            ${r.steps?.length ? `
+              <div class="detail-section">
+                <h4>Steps (${r.steps.length})</h4>
+                <ol class="steps-list">${r.steps.sort((a,b) => a.order - b.order).map(s => `<li>${esc(s.instruction)}</li>`).join('')}</ol>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      })
+      .catch(() => {
+        document.getElementById('recipe-detail-body').innerHTML = '<p class="text-error">Failed to load recipe.</p>';
+      });
+  }
+
+  function toggleHide(id) {
+    fetch('/admin/api/recipes/' + id + '/toggle-hide', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        toastAndReload(data.isHidden ? 'Recipe hidden' : 'Recipe visible');
+      })
+      .catch(() => showToast('Failed to update recipe', 'error'));
+  }
+
+  function deleteRecipe(id, title) {
+    if (!confirm('Permanently delete "' + title + '"? This cannot be undone.')) return;
+    fetch('/admin/api/recipes/' + id, { method: 'DELETE' })
+      .then(r => r.json())
+      .then(() => {
+        toastAndReload('Recipe deleted');
+      })
+      .catch(() => showToast('Failed to delete recipe', 'error'));
+  }
+</script>
+
+<%- include('partials/footer') %>

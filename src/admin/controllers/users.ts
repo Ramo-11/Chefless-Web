@@ -1,0 +1,113 @@
+import { Request, Response } from "express";
+import User from "../../models/User";
+
+export async function usersPage(req: Request, res: Response): Promise<void> {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = 20;
+    const search = (req.query.search as string) || "";
+    const filter = (req.query.filter as string) || "all";
+
+    const query: Record<string, unknown> = {};
+
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (filter === "premium") query.isPremium = true;
+    if (filter === "banned") query.isBanned = true;
+    if (filter === "admin") query.isAdmin = true;
+
+    const skip = (page - 1) * limit;
+
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select(
+          "fullName email profilePicture isPremium isBanned isAdmin recipesCount followersCount followingCount createdAt"
+        )
+        .lean(),
+      User.countDocuments(query),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    res.render("users", {
+      page: "users",
+      users,
+      pagination: { current: page, total: totalPages, totalItems: total },
+      search,
+      filter,
+    });
+  } catch (error) {
+    console.error("Failed to load users page:", error);
+    res.status(500).send("Internal server error");
+  }
+}
+
+export async function userDetail(req: Request, res: Response): Promise<void> {
+  try {
+    const user = await User.findById(req.params.id).lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    res.json({ user });
+  } catch (error) {
+    console.error("Failed to get user detail:", error);
+    res.status(500).json({ error: "Failed to load user" });
+  }
+}
+
+export async function banUser(req: Request, res: Response): Promise<void> {
+  try {
+    const { reason } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        isBanned: true,
+        banReason: reason || "Violation of terms of service",
+        bannedAt: new Date(),
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to ban user:", error);
+    res.status(500).json({ error: "Failed to ban user" });
+  }
+}
+
+export async function unbanUser(req: Request, res: Response): Promise<void> {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        isBanned: false,
+        $unset: { banReason: 1, bannedAt: 1 },
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to unban user:", error);
+    res.status(500).json({ error: "Failed to unban user" });
+  }
+}

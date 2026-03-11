@@ -1,0 +1,181 @@
+<% var pageTitle = 'Reports'; %>
+<%- include('partials/header') %>
+
+<div class="page-header">
+  <h1>Reports</h1>
+  <p class="page-subtitle"><%= pendingCount %> pending reports</p>
+</div>
+
+<!-- Filters -->
+<div class="toolbar">
+  <div class="toolbar-filters">
+    <a href="/admin/reports?status=pending" class="filter-chip <%= status === 'pending' ? 'active' : '' %>">
+      Pending <% if (pendingCount > 0) { %><span class="filter-count"><%= pendingCount %></span><% } %>
+    </a>
+    <a href="/admin/reports?status=reviewed" class="filter-chip <%= status === 'reviewed' ? 'active' : '' %>">Reviewed</a>
+    <a href="/admin/reports?status=action_taken" class="filter-chip <%= status === 'action_taken' ? 'active' : '' %>">Action Taken</a>
+    <a href="/admin/reports?status=dismissed" class="filter-chip <%= status === 'dismissed' ? 'active' : '' %>">Dismissed</a>
+    <a href="/admin/reports?status=all" class="filter-chip <%= status === 'all' ? 'active' : '' %>">All</a>
+  </div>
+  <div class="toolbar-filters">
+    <a href="/admin/reports?status=<%= status %>&targetType=" class="filter-chip <%= !targetType ? 'active' : '' %>">All Types</a>
+    <a href="/admin/reports?status=<%= status %>&targetType=recipe" class="filter-chip <%= targetType === 'recipe' ? 'active' : '' %>">Recipes</a>
+    <a href="/admin/reports?status=<%= status %>&targetType=user" class="filter-chip <%= targetType === 'user' ? 'active' : '' %>">Users</a>
+  </div>
+</div>
+
+<!-- Reports Table -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Reporter</th>
+          <th>Target</th>
+          <th>Reason</th>
+          <th>Status</th>
+          <th>Date</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% reports.forEach(function(report) { %>
+        <tr>
+          <td>
+            <div class="user-cell">
+              <% if (report.reporterId && report.reporterId.profilePicture) { %>
+                <img src="<%= report.reporterId.profilePicture %>" alt="" class="avatar-sm">
+              <% } else { %>
+                <div class="avatar-sm avatar-placeholder">
+                  <%= report.reporterId ? report.reporterId.fullName.charAt(0).toUpperCase() : '?' %>
+                </div>
+              <% } %>
+              <span><%= report.reporterId ? report.reporterId.fullName : 'Unknown' %></span>
+            </div>
+          </td>
+          <td>
+            <div class="target-cell">
+              <span class="badge badge-default"><%= report.targetType %></span>
+              <span><%= report.targetName %></span>
+            </div>
+          </td>
+          <td>
+            <span class="badge badge-reason badge-reason-<%= report.reason %>"><%= report.reason %></span>
+            <% if (report.description) { %>
+              <p class="report-desc"><%= report.description %></p>
+            <% } %>
+          </td>
+          <td>
+            <span class="badge badge-status-<%= report.status %>">
+              <%= report.status.replace('_', ' ') %>
+            </span>
+          </td>
+          <td class="text-muted"><%= new Date(report.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %></td>
+          <td>
+            <% if (report.status === 'pending') { %>
+            <div class="action-buttons">
+              <button class="btn btn-sm btn-primary" onclick="showReviewModal('<%= report._id %>')" aria-label="Review report">
+                Review
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="dismissReport('<%= report._id %>')" aria-label="Dismiss report">
+                Dismiss
+              </button>
+            </div>
+            <% } else { %>
+              <span class="text-muted text-sm">
+                <% if (report.reviewedBy) { %>
+                  by <%= report.reviewedBy.fullName %>
+                <% } %>
+              </span>
+            <% } %>
+          </td>
+        </tr>
+        <% }); %>
+        <% if (reports.length === 0) { %>
+        <tr>
+          <td colspan="6" class="empty-state">
+            <i class="fas fa-check-circle"></i>
+            <span>No reports to show</span>
+          </td>
+        </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<% if (pagination.total > 1) { %>
+  <%- include('partials/pagination', { pagination, baseUrl: '/admin/reports?status=' + status + '&targetType=' + (targetType || '') }) %>
+<% } %>
+
+<!-- Review Modal -->
+<div class="modal" id="review-modal">
+  <div class="modal-content modal-sm">
+    <div class="modal-header">
+      <h2>Review Report</h2>
+      <button class="modal-close" onclick="closeModal('review-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Action</label>
+        <select id="review-status">
+          <option value="reviewed">Mark as Reviewed</option>
+          <option value="action_taken">Take Action (hide/ban)</option>
+          <option value="dismissed">Dismiss</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="review-note">Note</label>
+        <textarea id="review-note" rows="3" placeholder="Optional admin note..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('review-modal')">Cancel</button>
+      <button class="btn btn-primary" id="confirm-review-btn" onclick="confirmReview()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let reviewReportId = null;
+
+  function showReviewModal(id) {
+    reviewReportId = id;
+    document.getElementById('review-status').value = 'reviewed';
+    document.getElementById('review-note').value = '';
+    openModal('review-modal');
+  }
+
+  function confirmReview() {
+    if (!reviewReportId) return;
+    const status = document.getElementById('review-status').value;
+    const reviewNote = document.getElementById('review-note').value;
+
+    fetch('/admin/api/reports/' + reviewReportId + '/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, reviewNote })
+    })
+    .then(r => r.json())
+    .then(() => {
+      closeModal('review-modal');
+      toastAndReload('Report updated');
+    })
+    .catch(() => showToast('Failed to update report', 'error'));
+  }
+
+  function dismissReport(id) {
+    if (!confirm('Dismiss this report?')) return;
+    fetch('/admin/api/reports/' + id + '/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(() => {
+      toastAndReload('Report dismissed');
+    })
+    .catch(() => showToast('Failed to dismiss report', 'error'));
+  }
+</script>
+
+<%- include('partials/footer') %>

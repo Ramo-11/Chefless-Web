@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= typeof pageTitle !== 'undefined' ? pageTitle + ' — ' : '' %>Chefless Admin</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="/admin/css/admin.css">
+</head>
+<body>
+  <div class="admin-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <i class="fas fa-utensils"></i>
+          <span>Chefless</span>
+        </div>
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+          <i class="fas fa-bars"></i>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="/admin" class="nav-item <%= page === 'dashboard' ? 'active' : '' %>">
+          <i class="fas fa-chart-line"></i>
+          <span>Dashboard</span>
+        </a>
+        <a href="/admin/users" class="nav-item <%= page === 'users' ? 'active' : '' %>">
+          <i class="fas fa-users"></i>
+          <span>Users</span>
+        </a>
+        <a href="/admin/recipes" class="nav-item <%= page === 'recipes' ? 'active' : '' %>">
+          <i class="fas fa-book-open"></i>
+          <span>Recipes</span>
+        </a>
+        <a href="/admin/reports" class="nav-item <%= page === 'reports' ? 'active' : '' %>">
+          <i class="fas fa-flag"></i>
+          <span>Reports</span>
+          <% if (typeof pendingCount !== 'undefined' && pendingCount > 0) { %>
+            <span class="badge badge-danger"><%= pendingCount %></span>
+          <% } %>
+        </a>
+        <a href="/admin/labels" class="nav-item <%= page === 'labels' ? 'active' : '' %>">
+          <i class="fas fa-tags"></i>
+          <span>Labels</span>
+        </a>
+        <a href="/admin/seasonal" class="nav-item <%= page === 'seasonal' ? 'active' : '' %>">
+          <i class="fas fa-snowflake"></i>
+          <span>Seasonal</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="admin-info">
+          <div class="admin-avatar">
+            <i class="fas fa-user-shield"></i>
+          </div>
+          <div class="admin-details">
+            <span class="admin-name"><%= adminName %></span>
+            <span class="admin-role"><%= adminRole === 'super_admin' ? 'Super Admin' : 'Admin' %></span>
+          </div>
+        </div>
+        <form action="/admin/logout" method="POST" class="logout-form">
+          <button type="submit" class="btn-logout" aria-label="Logout">
+            <i class="fas fa-sign-out-alt"></i>
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="top-bar">
+        <button class="mobile-toggle" id="mobile-toggle" aria-label="Toggle menu">
+          <i class="fas fa-bars"></i>
+        </button>
+        <div class="breadcrumb">
+          <% if (page !== 'dashboard') { %>
+            <a href="/admin">Dashboard</a>
+            <i class="fas fa-chevron-right"></i>
+            <span><%= page.charAt(0).toUpperCase() + page.slice(1) %></span>
+          <% } else { %>
+            <span>Dashboard</span>
+          <% } %>
+        </div>
+      </header>
+
+      <div class="content-area">
+        <%- body %>
+      </div>
+    </main>
+  </div>
+
+  <!-- Notification Toast -->
+  <div class="toast" id="toast">
+    <i class="toast-icon"></i>
+    <span class="toast-message"></span>
+  </div>
+
+  <!-- Overlay for mobile sidebar -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <script src="/admin/js/admin.js"></script>
+</body>
+</html>

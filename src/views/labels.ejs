@@ -1,0 +1,148 @@
+<% var pageTitle = 'Labels'; %>
+<%- include('partials/header') %>
+
+<div class="page-header">
+  <h1>System Labels</h1>
+  <p class="page-subtitle">Manage recipe label categories</p>
+</div>
+
+<div class="content-split">
+  <!-- Labels Table -->
+  <div class="card card-flex">
+    <div class="card-header">
+      <h2>Current Labels</h2>
+    </div>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Icon</th>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% labels.forEach(function(label) { %>
+          <tr id="label-<%= label._id %>">
+            <td><span class="order-badge"><%= label.order %></span></td>
+            <td class="label-icon"><%= label.icon || '—' %></td>
+            <td>
+              <input type="text" class="inline-edit" id="name-<%= label._id %>" value="<%= label.name %>">
+            </td>
+            <td class="text-muted"><%= label.slug %></td>
+            <td>
+              <div class="action-buttons">
+                <button class="btn btn-sm btn-primary" onclick="updateLabel('<%= label._id %>')" aria-label="Save">
+                  <i class="fas fa-save"></i>
+                </button>
+                <button class="btn btn-sm btn-danger-outline" onclick="deleteLabel('<%= label._id %>', '<%= label.name %>')" aria-label="Delete">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          <% }); %>
+          <% if (labels.length === 0) { %>
+          <tr>
+            <td colspan="5" class="empty-state">No labels yet. Add one below.</td>
+          </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Label Form -->
+  <div class="card card-form">
+    <div class="card-header">
+      <h2>Add Label</h2>
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <label for="new-name">Name</label>
+        <input type="text" id="new-name" placeholder="e.g. Breakfast">
+      </div>
+      <div class="form-group">
+        <label for="new-slug">Slug</label>
+        <input type="text" id="new-slug" placeholder="e.g. breakfast">
+      </div>
+      <div class="form-group">
+        <label for="new-icon">Icon (emoji)</label>
+        <input type="text" id="new-icon" placeholder="e.g. 🍳">
+      </div>
+      <div class="form-group">
+        <label for="new-order">Order</label>
+        <input type="number" id="new-order" value="0" min="0">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="createLabel()">
+        <i class="fas fa-plus"></i> Add Label
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Auto-generate slug from name
+  document.getElementById('new-name').addEventListener('input', function() {
+    document.getElementById('new-slug').value = this.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  });
+
+  function createLabel() {
+    const name = document.getElementById('new-name').value.trim();
+    const slug = document.getElementById('new-slug').value.trim();
+    const icon = document.getElementById('new-icon').value.trim();
+    const order = document.getElementById('new-order').value;
+
+    if (!name || !slug) {
+      showToast('Name and slug are required', 'error');
+      return;
+    }
+
+    fetch('/admin/api/labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, slug, icon, order })
+    })
+    .then(r => {
+      if (!r.ok) return r.json().then(d => { throw new Error(d.error); });
+      return r.json();
+    })
+    .then(() => {
+      toastAndReload('Label created');
+    })
+    .catch(e => showToast(e.message || 'Failed to create label', 'error'));
+  }
+
+  function updateLabel(id) {
+    const name = document.getElementById('name-' + id).value.trim();
+    if (!name) {
+      showToast('Name cannot be empty', 'error');
+      return;
+    }
+
+    fetch('/admin/api/labels/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })
+    .then(r => r.json())
+    .then(() => showToast('Label updated', 'success'))
+    .catch(() => showToast('Failed to update label', 'error'));
+  }
+
+  function deleteLabel(id, name) {
+    if (!confirm('Delete label "' + name + '"? Recipes using it will keep the tag but it won\'t appear in the label list.')) return;
+
+    fetch('/admin/api/labels/' + id, { method: 'DELETE' })
+      .then(r => r.json())
+      .then(() => {
+        showToast('Label deleted', 'success');
+        document.getElementById('label-' + id)?.remove();
+      })
+      .catch(() => showToast('Failed to delete label', 'error'));
+  }
+</script>
+
+<%- include('partials/footer') %>

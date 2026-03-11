@@ -1,0 +1,130 @@
+<% var pageTitle = 'Dashboard'; %>
+<%- include('partials/header') %>
+
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <p class="page-subtitle">Overview of your Chefless platform</p>
+</div>
+
+<!-- Stats Grid -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-blue">
+      <i class="fas fa-users"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= stats.totalUsers.toLocaleString() %></span>
+      <span class="stat-label">Total Users</span>
+    </div>
+    <div class="stat-trend stat-trend-up">
+      <i class="fas fa-arrow-up"></i> <%= stats.newUsersWeek %> this week
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-green">
+      <i class="fas fa-book-open"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= stats.totalRecipes.toLocaleString() %></span>
+      <span class="stat-label">Recipes</span>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-purple">
+      <i class="fas fa-house-chimney"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= stats.totalKitchens.toLocaleString() %></span>
+      <span class="stat-label">Kitchens</span>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-amber">
+      <i class="fas fa-crown"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= stats.premiumUsers.toLocaleString() %></span>
+      <span class="stat-label">Premium Users</span>
+    </div>
+  </div>
+
+  <div class="stat-card <%= stats.pendingReports > 0 ? 'stat-card-alert' : '' %>">
+    <div class="stat-icon stat-icon-red">
+      <i class="fas fa-flag"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= stats.pendingReports %></span>
+      <span class="stat-label">Pending Reports</span>
+    </div>
+    <% if (stats.pendingReports > 0) { %>
+      <a href="/admin/reports" class="stat-action">Review <i class="fas fa-arrow-right"></i></a>
+    <% } %>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-slate">
+      <i class="fas fa-ban"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= stats.bannedUsers %></span>
+      <span class="stat-label">Banned Users</span>
+    </div>
+  </div>
+</div>
+
+<!-- Recent Users -->
+<div class="card">
+  <div class="card-header">
+    <h2><i class="fas fa-user-plus"></i> Recent Signups</h2>
+    <a href="/admin/users" class="btn btn-sm btn-secondary">View All</a>
+  </div>
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Email</th>
+          <th>Status</th>
+          <th>Joined</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% recentUsers.forEach(function(user) { %>
+        <tr>
+          <td>
+            <div class="user-cell">
+              <% if (user.profilePicture) { %>
+                <img src="<%= user.profilePicture %>" alt="" class="avatar-sm">
+              <% } else { %>
+                <div class="avatar-sm avatar-placeholder">
+                  <%= user.fullName.charAt(0).toUpperCase() %>
+                </div>
+              <% } %>
+              <span><%= user.fullName %></span>
+            </div>
+          </td>
+          <td class="text-muted"><%= user.email %></td>
+          <td>
+            <% if (user.isPremium) { %>
+              <span class="badge badge-premium"><i class="fas fa-crown"></i> Premium</span>
+            <% } else { %>
+              <span class="badge badge-default">Free</span>
+            <% } %>
+          </td>
+          <td class="text-muted"><%= new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></td>
+        </tr>
+        <% }); %>
+        <% if (recentUsers.length === 0) { %>
+        <tr>
+          <td colspan="4" class="empty-state">No users yet</td>
+        </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('partials/footer') %>

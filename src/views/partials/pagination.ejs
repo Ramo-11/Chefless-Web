@@ -1,0 +1,27 @@
+<div class="pagination">
+  <% if (pagination.current > 1) { %>
+    <a href="<%= baseUrl %>&page=<%= pagination.current - 1 %>" class="pagination-btn">
+      <i class="fas fa-chevron-left"></i> Previous
+    </a>
+  <% } else { %>
+    <span class="pagination-btn disabled"><i class="fas fa-chevron-left"></i> Previous</span>
+  <% } %>
+
+  <div class="pagination-pages">
+    <% for (let i = Math.max(1, pagination.current - 2); i <= Math.min(pagination.total, pagination.current + 2); i++) { %>
+      <a href="<%= baseUrl %>&page=<%= i %>" class="pagination-page <%= i === pagination.current ? 'active' : '' %>"><%= i %></a>
+    <% } %>
+  </div>
+
+  <span class="pagination-info">
+    Page <%= pagination.current %> of <%= pagination.total %>
+  </span>
+
+  <% if (pagination.current < pagination.total) { %>
+    <a href="<%= baseUrl %>&page=<%= pagination.current + 1 %>" class="pagination-btn">
+      Next <i class="fas fa-chevron-right"></i>
+    </a>
+  <% } else { %>
+    <span class="pagination-btn disabled">Next <i class="fas fa-chevron-right"></i></span>
+  <% } %>
+</div>

@@ -1,0 +1,216 @@
+<% var pageTitle = 'Seasonal'; %>
+<%- include('partials/header') %>
+
+<div class="page-header">
+  <h1>Seasonal Curation</h1>
+  <p class="page-subtitle">Manage seasonal recipe collections</p>
+</div>
+
+<div class="content-split">
+  <!-- Tags List -->
+  <div class="card card-flex">
+    <div class="card-header">
+      <h2>Seasonal Tags</h2>
+    </div>
+    <div class="tag-cards">
+      <% tags.forEach(function(tag) { %>
+      <div class="seasonal-card <%= selectedTag === tag.slug ? 'selected' : '' %> <%= !tag.isActive ? 'inactive' : '' %>">
+        <a href="/admin/seasonal?tag=<%= tag.slug %>" class="seasonal-card-link">
+          <div class="seasonal-card-header">
+            <h3><%= tag.name %></h3>
+            <span class="badge <%= tag.isActive ? 'badge-success' : 'badge-default' %>">
+              <%= tag.isActive ? 'Active' : 'Inactive' %>
+            </span>
+          </div>
+          <div class="seasonal-card-meta">
+            <span><i class="fas fa-calendar"></i> <%= new Date(tag.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %> – <%= new Date(tag.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></span>
+            <span><i class="fas fa-book-open"></i> <%= tag.recipesCount %> recipes</span>
+          </div>
+        </a>
+        <div class="seasonal-card-actions">
+          <button class="btn btn-sm btn-secondary" onclick="toggleTag('<%= tag._id %>')" aria-label="Toggle active">
+            <i class="fas fa-<%= tag.isActive ? 'pause' : 'play' %>"></i>
+          </button>
+          <button class="btn btn-sm btn-danger-outline" onclick="deleteTag('<%= tag._id %>', '<%= tag.name %>')" aria-label="Delete tag">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </div>
+      <% }); %>
+      <% if (tags.length === 0) { %>
+      <div class="empty-state-inline">No seasonal tags yet. Create one to start curating.</div>
+      <% } %>
+    </div>
+
+    <!-- Create Tag Form -->
+    <div class="card-body" style="border-top: 1px solid var(--border-color);">
+      <h3 style="margin-bottom: 1rem;">Create Tag</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="tag-name">Name</label>
+          <input type="text" id="tag-name" placeholder="e.g. Ramadan 2026">
+        </div>
+        <div class="form-group">
+          <label for="tag-slug">Slug</label>
+          <input type="text" id="tag-slug" placeholder="e.g. ramadan-2026">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="tag-start">Start Date</label>
+          <input type="date" id="tag-start">
+        </div>
+        <div class="form-group">
+          <label for="tag-end">End Date</label>
+          <input type="date" id="tag-end">
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="createTag()">
+        <i class="fas fa-plus"></i> Create Tag
+      </button>
+    </div>
+  </div>
+
+  <!-- Tagged Recipes / Search -->
+  <div class="card card-form">
+    <% if (selectedTag) { %>
+    <div class="card-header">
+      <h2>Recipes tagged "<%= selectedTag %>"</h2>
+    </div>
+    <div class="card-body">
+      <% if (taggedRecipes.length > 0) { %>
+        <div class="recipe-list">
+          <% taggedRecipes.forEach(function(recipe) { %>
+          <div class="recipe-list-item">
+            <div class="recipe-cell">
+              <% if (recipe.photos && recipe.photos.length > 0) { %>
+                <img src="<%= recipe.photos[0] %>" alt="" class="recipe-thumb-sm">
+              <% } %>
+              <div>
+                <span class="recipe-title"><%= recipe.title %></span>
+                <span class="text-muted text-sm">by <%= recipe.authorId ? recipe.authorId.fullName : 'Unknown' %></span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-danger-outline" onclick="untagRecipe('<%= recipe._id %>', '<%= selectedTag %>')" aria-label="Remove tag">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <% }); %>
+        </div>
+      <% } else { %>
+        <p class="text-muted">No recipes tagged yet. Use search to find and tag recipes.</p>
+      <% } %>
+    </div>
+    <% } %>
+
+    <div class="card-header" style="border-top: 1px solid var(--border-color);">
+      <h2>Search & Tag Recipes</h2>
+    </div>
+    <div class="card-body">
+      <form action="/admin/seasonal" method="GET" class="toolbar-search" style="margin-bottom: 1rem;">
+        <div class="input-with-icon">
+          <i class="fas fa-search"></i>
+          <input type="text" name="search" value="<%= search %>" placeholder="Search recipes by title...">
+        </div>
+        <% if (selectedTag) { %><input type="hidden" name="tag" value="<%= selectedTag %>"><% } %>
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+      </form>
+
+      <% if (searchResults.length > 0) { %>
+        <div class="recipe-list">
+          <% searchResults.forEach(function(recipe) { %>
+          <div class="recipe-list-item">
+            <div class="recipe-cell">
+              <% if (recipe.photos && recipe.photos.length > 0) { %>
+                <img src="<%= recipe.photos[0] %>" alt="" class="recipe-thumb-sm">
+              <% } %>
+              <div>
+                <span class="recipe-title"><%= recipe.title %></span>
+                <span class="text-muted text-sm">by <%= recipe.authorId ? recipe.authorId.fullName : 'Unknown' %></span>
+                <% if (recipe.seasonalTags?.length) { %>
+                  <div class="tag-list tag-list-sm"><% recipe.seasonalTags.forEach(function(t) { %><span class="tag tag-sm"><%= t %></span><% }); %></div>
+                <% } %>
+              </div>
+            </div>
+            <% if (selectedTag) { %>
+              <button class="btn btn-sm btn-primary" onclick="tagRecipe('<%= recipe._id %>', '<%= selectedTag %>')" aria-label="Add tag">
+                <i class="fas fa-plus"></i> Tag
+              </button>
+            <% } else { %>
+              <span class="text-muted text-sm">Select a tag first</span>
+            <% } %>
+          </div>
+          <% }); %>
+        </div>
+      <% } else if (search) { %>
+        <p class="text-muted">No recipes found for "<%= search %>"</p>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('tag-name')?.addEventListener('input', function() {
+    document.getElementById('tag-slug').value = this.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  });
+
+  function createTag() {
+    const name = document.getElementById('tag-name').value.trim();
+    const slug = document.getElementById('tag-slug').value.trim();
+    const startDate = document.getElementById('tag-start').value;
+    const endDate = document.getElementById('tag-end').value;
+
+    if (!name || !slug || !startDate || !endDate) {
+      showToast('All fields are required', 'error');
+      return;
+    }
+
+    fetch('/admin/api/seasonal/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, slug, startDate, endDate })
+    })
+    .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.error); }); return r.json(); })
+    .then(() => { toastAndReload('Tag created'); })
+    .catch(e => showToast(e.message || 'Failed to create tag', 'error'));
+  }
+
+  function toggleTag(id) {
+    fetch('/admin/api/seasonal/tags/' + id + '/toggle', { method: 'POST' })
+      .then(r => r.json())
+      .then(() => { toastAndReload('Tag updated'); })
+      .catch(() => showToast('Failed to update tag', 'error'));
+  }
+
+  function deleteTag(id, name) {
+    if (!confirm('Delete "' + name + '"? This will remove the tag from all recipes.')) return;
+    fetch('/admin/api/seasonal/tags/' + id, { method: 'DELETE' })
+      .then(r => r.json())
+      .then(() => { toastAndReload('Tag deleted'); })
+      .catch(() => showToast('Failed to delete tag', 'error'));
+  }
+
+  function tagRecipe(recipeId, tagSlug) {
+    fetch('/admin/api/seasonal/tag-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeId, tagSlug })
+    })
+    .then(r => r.json())
+    .then(() => { toastAndReload('Recipe tagged'); })
+    .catch(() => showToast('Failed to tag recipe', 'error'));
+  }
+
+  function untagRecipe(recipeId, tagSlug) {
+    fetch('/admin/api/seasonal/untag-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeId, tagSlug })
+    })
+    .then(r => r.json())
+    .then(() => { toastAndReload('Tag removed'); })
+    .catch(() => showToast('Failed to remove tag', 'error'));
+  }
+</script>
+
+<%- include('partials/footer') %>
