@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -9,7 +10,9 @@ const envSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().min(1, "FIREBASE_PROJECT_ID is required"),
   FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
   REVENUECAT_WEBHOOK_SECRET: z.string().default(""),
-  SESSION_SECRET: z.string().default("chefless-admin-dev-secret-change-in-prod"),
+  SESSION_SECRET: z
+    .string()
+    .transform((val) => val || "chefless-admin-dev-secret-change-in-prod"),
 });
 
 type Env = z.infer<typeof envSchema>;
