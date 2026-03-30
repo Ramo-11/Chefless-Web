@@ -10,6 +10,8 @@ export interface IKitchen extends Document {
   membersWithScheduleEdit: Types.ObjectId[];
   membersWithApprovalPower: Types.ObjectId[];
   memberCount: number;
+  /** Custom meal slot names added by the kitchen lead (e.g. "Pre-Workout", "Late Night"). */
+  customMealSlots: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,6 +58,10 @@ const kitchenSchema = new Schema<IKitchen>(
       type: Number,
       default: 1,
       min: 0,
+    },
+    customMealSlots: {
+      type: [String],
+      default: [],
     },
   },
   {

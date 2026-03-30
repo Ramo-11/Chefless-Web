@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import User from "../models/User";
+import Kitchen from "../models/Kitchen";
 import {
   createKitchen,
   getMyKitchen,
@@ -320,6 +321,99 @@ router.get(
     );
 
     res.status(200).json(result);
+  })
+);
+
+// --- Custom Meal Slots ---
+
+const customSlotsSchema = z.object({
+  customMealSlots: z
+    .array(z.string().min(1).max(50).trim())
+    .max(20, { message: "Maximum 20 custom meal slots" }),
+});
+
+// GET /api/kitchens/slots — Get the kitchen's custom meal slots
+router.get(
+  "/slots",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id kitchenId")
+      .lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    if (!currentUser.kitchenId) {
+      res.status(400).json({ error: "You are not in a kitchen" });
+      return;
+    }
+
+    const kitchen = await Kitchen.findById(currentUser.kitchenId)
+      .select("customMealSlots")
+      .lean();
+
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    res.status(200).json({ customMealSlots: kitchen.customMealSlots ?? [] });
+  })
+);
+
+// PUT /api/kitchens/slots — Replace custom meal slots (lead only)
+router.put(
+  "/slots",
+  requireAuth,
+  validate({ body: customSlotsSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id kitchenId")
+      .lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    if (!currentUser.kitchenId) {
+      res.status(400).json({ error: "You are not in a kitchen" });
+      return;
+    }
+
+    const kitchen = await Kitchen.findById(currentUser.kitchenId)
+      .select("leadId")
+      .lean();
+
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    if (kitchen.leadId.toString() !== currentUser._id.toString()) {
+      res.status(403).json({ error: "Only the kitchen lead can manage meal slots" });
+      return;
+    }
+
+    const { customMealSlots } = req.body as z.infer<typeof customSlotsSchema>;
+
+    // Deduplicate and normalise to lowercase for consistent matching
+    const normalised = [
+      ...new Set(customMealSlots.map((s) => s.trim())),
+    ].filter((s) => s.length > 0);
+
+    const updated = await Kitchen.findByIdAndUpdate(
+      currentUser.kitchenId,
+      { customMealSlots: normalised },
+      { new: true, select: "customMealSlots" }
+    ).lean();
+
+    res.status(200).json({ customMealSlots: updated?.customMealSlots ?? [] });
   })
 );
 

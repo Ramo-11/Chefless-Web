@@ -18,6 +18,7 @@ import {
   shareRecipe,
   uploadRecipePhoto,
 } from "../services/recipe-service";
+import { importRecipeFromUrl } from "../services/recipe-import-service";
 
 const router = Router();
 
@@ -381,6 +382,30 @@ router.post(
     const share = await shareRecipe(id, user._id.toString(), recipientId, message);
 
     res.status(201).json({ share });
+  })
+);
+
+// --- Recipe Import ---
+
+const importRecipeSchema = z.object({
+  url: z
+    .string()
+    .url({ message: "A valid HTTP/HTTPS URL is required." })
+    .max(2048),
+});
+
+// POST /api/recipes/import — Fetch and parse a recipe from an external URL.
+// Returns pre-fill data for the creation form; does NOT create a recipe.
+router.post(
+  "/import",
+  requireAuth,
+  validate({ body: importRecipeSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { url } = req.body as z.infer<typeof importRecipeSchema>;
+
+    const recipe = await importRecipeFromUrl(url);
+
+    res.status(200).json({ recipe });
   })
 );
 

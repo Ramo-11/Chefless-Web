@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import User from "../models/User";
+import Recipe from "../models/Recipe";
 import { uploadImage } from "../lib/cloudinary";
 import {
   getUserById,
@@ -329,6 +330,58 @@ router.get(
     }
 
     res.status(200).json({ user: profile, followStatus });
+  })
+);
+
+// GET /api/users/:id/recipes — List a user's public (non-private) recipes
+router.get(
+  "/:id/recipes",
+  requireAuth,
+  validate({ params: objectIdParam, query: paginationSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const { page, limit } = req.query as unknown as z.infer<
+      typeof paginationSchema
+    >;
+
+    const targetUser = await User.findById(id)
+      .select("_id fullName profilePicture")
+      .lean();
+    if (!targetUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const skip = (page - 1) * limit;
+    const query = {
+      authorId: targetUser._id,
+      isPrivate: false,
+      isHidden: false,
+    };
+
+    const [recipes, total] = await Promise.all([
+      Recipe.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Recipe.countDocuments(query),
+    ]);
+
+    // Attach author info to each recipe
+    const data = recipes.map((r) => ({
+      ...r,
+      authorName: targetUser.fullName,
+      authorPhoto: targetUser.profilePicture,
+    }));
+
+    res.status(200).json({
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    });
   })
 );
 

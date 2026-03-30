@@ -180,7 +180,22 @@ export async function getRecipe(
     throw createError("You do not have permission to view this recipe", 403);
   }
 
-  return recipe;
+  // Attach author info to the response.
+  const recipeObj = recipe.toObject() as unknown as Record<string, unknown>;
+  recipeObj.authorName = author.fullName;
+  recipeObj.authorPhoto = author.profilePicture ?? null;
+
+  // Check if the requester has liked this recipe.
+  if (viewerId) {
+    const Like = (await import("../models/Like")).default;
+    const liked = await Like.exists({
+      userId: viewerId,
+      recipeId: recipe._id,
+    });
+    recipeObj.isLiked = !!liked;
+  }
+
+  return recipeObj as unknown as IRecipe;
 }
 
 export async function updateRecipe(

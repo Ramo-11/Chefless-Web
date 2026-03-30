@@ -34,6 +34,34 @@ interface PaginatedNotifications {
   totalPages: number;
 }
 
+// --- Helpers ---
+
+/**
+ * Returns the in-app deep-link route that best matches a notification type,
+ * so the Flutter client can navigate directly when the notification is tapped.
+ */
+function deriveRouteForType(params: CreateNotificationParams): string | null {
+  switch (params.type) {
+    case "recipe_liked":
+    case "recipe_forked":
+    case "recipe_shared":
+      return params.recipeId ? `/recipe/${params.recipeId}` : null;
+    case "new_follower":
+    case "follow_request":
+    case "follow_accepted":
+      return params.actorId ? `/user/${params.actorId}` : null;
+    case "schedule_suggestion":
+    case "suggestion_approved":
+    case "suggestion_denied":
+      return "/schedule";
+    case "kitchen_joined":
+    case "kitchen_removed":
+      return "/kitchen";
+    default:
+      return "/notifications";
+  }
+}
+
 // --- Core Functions ---
 
 /**
@@ -79,8 +107,18 @@ export async function createNotification(
     if (params.recipeId) {
       pushData.recipeId = params.recipeId.toString();
     }
+    if (params.actorId) {
+      pushData.actorId = params.actorId.toString();
+    }
     if (params.kitchenId) {
       pushData.kitchenId = params.kitchenId.toString();
+    }
+
+    // Compute a `route` field so the Flutter app can deep-link directly
+    // to the relevant screen when the notification is tapped.
+    const route = deriveRouteForType(params);
+    if (route) {
+      pushData.route = route;
     }
 
     sendPushNotification(
