@@ -10,7 +10,6 @@ const router = Router();
 
 const registerSchema = z.object({
   fullName: z.string().min(1, "Full name is required").max(100),
-  email: z.string().email("Invalid email address"),
 });
 
 const fcmTokenSchema = z.object({
@@ -35,8 +34,15 @@ router.post(
   requireAuth,
   validate({ body: registerSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const { fullName, email } = req.body as z.infer<typeof registerSchema>;
+    const { fullName } = req.body as z.infer<typeof registerSchema>;
     const firebaseUid = req.user!.uid;
+
+    // Email must come from the verified Firebase token — never trust the request body
+    const email = req.user!.email;
+    if (!email) {
+      res.status(400).json({ error: "Firebase token has no verified email address" });
+      return;
+    }
 
     // Idempotent: return existing user if already registered with this firebaseUid
     const existingByUid = await User.findOne({ firebaseUid });
@@ -77,25 +83,26 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const firebaseUid = req.user!.uid;
 
-    let user = await User.findOne({ firebaseUid });
+    let user = await User.findOneAndUpdate(
+      { firebaseUid },
+      { $set: { lastActiveAt: new Date() } },
+      { new: true }
+    ).lean();
 
     // If not found by firebaseUid, check by email — the user may have
     // re-created their Firebase Auth account (new uid, same email).
     if (!user && req.user!.email) {
-      user = await User.findOne({ email: req.user!.email.toLowerCase() });
-      if (user) {
-        user.firebaseUid = firebaseUid;
-      }
+      user = await User.findOneAndUpdate(
+        { email: req.user!.email.toLowerCase() },
+        { $set: { firebaseUid, lastActiveAt: new Date() } },
+        { new: true }
+      ).lean();
     }
 
     if (!user) {
-      res.status(404).json({ error: "User not found" });
+      res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
-
-    // Update lastActiveAt
-    user.lastActiveAt = new Date();
-    await user.save();
 
     res.status(200).json({ user });
   })

@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { requireAdminSession } from "../middleware/adminSession";
+import { authLimiter } from "../middleware/rateLimit";
+import { csrfProtection } from "../middleware/csrf";
 import { loginPage, loginPost, logout } from "./auth";
 import { dashboardPage } from "./controllers/dashboard";
 import { usersPage, userDetail, banUser, unbanUser } from "./controllers/users";
@@ -28,8 +30,8 @@ const router = Router();
 
 // ── Auth (public) ───────────────────────────────────────────────────
 router.get("/login", loginPage);
-router.post("/login", loginPost);
-router.post("/logout", logout);
+router.post("/login", authLimiter, csrfProtection, loginPost);
+router.post("/logout", csrfProtection, logout);
 
 // ── All routes below require admin session ──────────────────────────
 router.use(requireAdminSession);
@@ -40,32 +42,32 @@ router.get("/", dashboardPage);
 // Users
 router.get("/users", usersPage);
 router.get("/api/users/:id", userDetail);
-router.post("/api/users/:id/ban", banUser);
-router.post("/api/users/:id/unban", unbanUser);
+router.post("/api/users/:id/ban", csrfProtection, banUser);
+router.post("/api/users/:id/unban", csrfProtection, unbanUser);
 
 // Recipes
 router.get("/recipes", recipesPage);
 router.get("/api/recipes/:id", recipeDetail);
-router.post("/api/recipes/:id/toggle-hide", toggleHideRecipe);
-router.delete("/api/recipes/:id", deleteRecipe);
+router.post("/api/recipes/:id/toggle-hide", csrfProtection, toggleHideRecipe);
+router.delete("/api/recipes/:id", csrfProtection, deleteRecipe);
 
 // Reports
 router.get("/reports", reportsPage);
-router.post("/api/reports/:id/review", reviewReport);
-router.post("/api/reports/:id/dismiss", dismissReport);
+router.post("/api/reports/:id/review", csrfProtection, reviewReport);
+router.post("/api/reports/:id/dismiss", csrfProtection, dismissReport);
 
 // Labels
 router.get("/labels", labelsPage);
-router.post("/api/labels", createLabel);
-router.put("/api/labels/:id", updateLabel);
-router.delete("/api/labels/:id", deleteLabel);
+router.post("/api/labels", csrfProtection, createLabel);
+router.put("/api/labels/:id", csrfProtection, updateLabel);
+router.delete("/api/labels/:id", csrfProtection, deleteLabel);
 
 // Seasonal
 router.get("/seasonal", seasonalPage);
-router.post("/api/seasonal/tags", createTag);
-router.post("/api/seasonal/tags/:id/toggle", toggleTag);
-router.delete("/api/seasonal/tags/:id", deleteTag);
-router.post("/api/seasonal/tag-recipe", tagRecipe);
-router.post("/api/seasonal/untag-recipe", untagRecipe);
+router.post("/api/seasonal/tags", csrfProtection, createTag);
+router.post("/api/seasonal/tags/:id/toggle", csrfProtection, toggleTag);
+router.delete("/api/seasonal/tags/:id", csrfProtection, deleteTag);
+router.post("/api/seasonal/tag-recipe", csrfProtection, tagRecipe);
+router.post("/api/seasonal/untag-recipe", csrfProtection, untagRecipe);
 
 export default router;

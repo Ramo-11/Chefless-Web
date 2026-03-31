@@ -1,6 +1,27 @@
 import { Request, Response } from "express";
 import Recipe from "../../models/Recipe";
 import Report from "../../models/Report";
+import AuditLog from "../../models/AuditLog";
+
+async function audit(
+  req: Request,
+  action: string,
+  targetType: string,
+  targetId?: string,
+  details?: Record<string, unknown>
+): Promise<void> {
+  AuditLog.create({
+    adminId: req.session.adminId ?? "unknown",
+    adminEmail: req.session.adminEmail ?? "unknown",
+    action,
+    targetType,
+    targetId,
+    details,
+    ipAddress: req.ip,
+  }).catch((err: unknown) => {
+    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+  });
+}
 
 export async function recipesPage(
   req: Request,
@@ -63,6 +84,7 @@ export async function toggleHideRecipe(
     }
     recipe.isHidden = !recipe.isHidden;
     await recipe.save();
+    await audit(req, recipe.isHidden ? "hide_recipe" : "unhide_recipe", "recipe", req.params.id);
     res.json({ success: true, isHidden: recipe.isHidden });
   } catch (error) {
     console.error("Failed to toggle recipe visibility:", error);
@@ -87,6 +109,7 @@ export async function deleteRecipe(
       targetId: recipe._id,
     });
 
+    await audit(req, "delete_recipe", "recipe", req.params.id, { title: recipe.title });
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to delete recipe:", error);

@@ -425,6 +425,27 @@ export async function notifySuggestionDenied(
   });
 }
 
+/**
+ * Notify with pre-loaded entry and kitchen data (avoids race condition
+ * when the entry has already been deleted before this runs).
+ */
+export async function notifySuggestionDeniedWithData(data: {
+  suggestedBy: Types.ObjectId;
+  kitchenId: Types.ObjectId;
+  kitchenName: string;
+  scheduleEntryId: Types.ObjectId;
+}): Promise<void> {
+  await createNotification({
+    userId: data.suggestedBy,
+    type: "suggestion_denied",
+    kitchenId: data.kitchenId,
+    kitchenName: data.kitchenName,
+    scheduleEntryId: data.scheduleEntryId,
+    pushTitle: "Suggestion Denied",
+    pushBody: `Your meal suggestion in ${data.kitchenName} was denied.`,
+  });
+}
+
 export async function notifyKitchenJoined(
   memberId: string,
   kitchenId: string

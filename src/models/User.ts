@@ -144,6 +144,8 @@ const userSchema = new Schema<IUser>(
       enum: ["monthly", "annual"],
     },
     premiumExpiresAt: { type: Date },
+    // NOTE: chefHatShipped and shippingAddress are reserved for a future
+    // "Chef Hat" premium physical reward feature. No API endpoints exist yet.
     chefHatShipped: { type: Boolean },
     shippingAddress: { type: shippingAddressSchema },
     dietaryPreferences: [{ type: String }],
@@ -172,6 +174,8 @@ const userSchema = new Schema<IUser>(
       default: () => ({ ...DEFAULT_NOTIFICATION_PREFERENCES }),
       _id: false,
     },
+    // NOTE: isAdmin is used for admin panel badge display only.
+    // API authorization is handled by AdminUser collection + express-session.
     isAdmin: {
       type: Boolean,
       default: false,

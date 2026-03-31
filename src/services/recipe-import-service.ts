@@ -97,20 +97,49 @@ function validateUrl(url: string): void {
     throw new Error("Only HTTP and HTTPS URLs are supported.");
   }
 
-  // Block private / loopback addresses to prevent SSRF.
+  // Block private / loopback / link-local addresses to prevent SSRF.
   const hostname = parsed.hostname.toLowerCase();
-  const blocked =
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname.startsWith("192.168.") ||
-    hostname.startsWith("10.") ||
-    hostname.startsWith("172.16.") ||
-    hostname === "::1" ||
-    hostname === "0.0.0.0";
 
-  if (blocked) {
+  // Strip IPv6 brackets if present
+  const host = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+
+  const isBlocked =
+    // Loopback
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.startsWith("127.") ||
+    // Link-local (AWS metadata, Azure IMDS, GCP metadata)
+    host.startsWith("169.254.") ||
+    // Private class A
+    host.startsWith("10.") ||
+    // Private class B (172.16.0.0 – 172.31.255.255)
+    isPrivateClassB(host) ||
+    // Private class C
+    host.startsWith("192.168.") ||
+    // Unspecified
+    host === "0.0.0.0" ||
+    // IPv6 loopback
+    host === "::1" ||
+    host === "0:0:0:0:0:0:0:1" ||
+    // IPv6 link-local
+    host.startsWith("fe80:") ||
+    // IPv6 unique local
+    host.startsWith("fc") ||
+    host.startsWith("fd") ||
+    // IPv6 unspecified
+    host === "::" ||
+    host === "0:0:0:0:0:0:0:0";
+
+  if (isBlocked) {
     throw new Error("That URL is not accessible.");
   }
+}
+
+function isPrivateClassB(host: string): boolean {
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  const second = parseInt(parts[1], 10);
+  return parts[0] === "172" && second >= 16 && second <= 31;
 }
 
 // ---------------------------------------------------------------------------

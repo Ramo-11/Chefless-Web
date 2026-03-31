@@ -10,7 +10,7 @@ export const NOTIFICATION_TYPES = [
   "schedule_suggestion",
   "suggestion_approved",
   "suggestion_denied",
-  "kitchen_invite",
+  "kitchen_invite", // NOTE: defined but not yet sent — reserved for future direct invite feature
   "kitchen_joined",
   "kitchen_removed",
   "system",
@@ -81,6 +81,15 @@ notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 
 // For counting unread
 notificationSchema.index({ userId: 1 });
+
+// Pagination index
+notificationSchema.index({ userId: 1, createdAt: -1 });
+
+// TTL: auto-delete notifications older than 90 days
+notificationSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 90 * 24 * 60 * 60 }
+);
 
 const Notification =
   (mongoose.models.Notification as mongoose.Model<INotification>) ||

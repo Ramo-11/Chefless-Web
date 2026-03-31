@@ -71,6 +71,10 @@ const shoppingListSchema = new Schema<IShoppingList>(
   }
 );
 
+// Compound indexes for efficient lookups sorted by last update
+shoppingListSchema.index({ kitchenId: 1, updatedAt: -1 });
+shoppingListSchema.index({ userId: 1, updatedAt: -1 });
+
 const ShoppingList =
   (mongoose.models.ShoppingList as mongoose.Model<IShoppingList>) ||
   mongoose.model<IShoppingList>("ShoppingList", shoppingListSchema);

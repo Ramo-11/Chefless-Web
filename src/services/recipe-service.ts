@@ -3,6 +3,7 @@ import Recipe, { IRecipe, IIngredient, IStep } from "../models/Recipe";
 import Like from "../models/Like";
 import RecipeShare from "../models/RecipeShare";
 import User from "../models/User";
+import SystemLabel from "../models/SystemLabel";
 import { canViewRecipe } from "./visibility-service";
 import { uploadImage } from "../lib/cloudinary";
 import {
@@ -84,6 +85,22 @@ interface PaginatedRecipes {
 
 // --- Helpers ---
 
+/**
+ * Validates that all provided label slugs exist in the SystemLabel collection.
+ * Throws a 400 error if any are invalid.
+ */
+async function validateLabels(labels: string[]): Promise<void> {
+  if (!labels || labels.length === 0) return;
+  const validLabels = await SystemLabel.find({ slug: { $in: labels } })
+    .select("slug")
+    .lean();
+  const validSlugs = new Set(validLabels.map((l) => l.slug));
+  const invalid = labels.filter((l) => !validSlugs.has(l));
+  if (invalid.length > 0) {
+    throw createError(`Invalid label(s): ${invalid.join(", ")}`, 400);
+  }
+}
+
 function computeTotalTime(prepTime?: number | null, cookTime?: number | null): number | undefined {
   if (prepTime != null && cookTime != null) {
     return prepTime + cookTime;
@@ -123,6 +140,10 @@ export async function createRecipe(
       `Free tier is limited to ${FREE_TIER_RECIPE_LIMIT} recipes. Upgrade to premium for unlimited recipes.`,
       403
     );
+  }
+
+  if (data.labels && data.labels.length > 0) {
+    await validateLabels(data.labels);
   }
 
   const totalTime = computeTotalTime(data.prepTime, data.cookTime);
@@ -185,6 +206,17 @@ export async function getRecipe(
   recipeObj.authorName = author.fullName;
   recipeObj.authorPhoto = author.profilePicture ?? null;
 
+  // Dynamically populate forkedFrom.authorName to prevent stale names after renames
+  const forkedFrom = recipeObj.forkedFrom as { recipeId: Types.ObjectId; authorId: Types.ObjectId; authorName: string } | undefined;
+  if (forkedFrom?.authorId) {
+    const forkAuthor = await User.findById(forkedFrom.authorId)
+      .select("fullName")
+      .lean();
+    if (forkAuthor) {
+      (recipeObj.forkedFrom as Record<string, unknown>).authorName = forkAuthor.fullName;
+    }
+  }
+
   // Check if the requester has liked this recipe.
   if (viewerId) {
     const Like = (await import("../models/Like")).default;
@@ -210,6 +242,10 @@ export async function updateRecipe(
 
   if (!recipe.authorId.equals(userId)) {
     throw createError("Only the author can update this recipe", 403);
+  }
+
+  if (updates.labels && updates.labels.length > 0) {
+    await validateLabels(updates.labels);
   }
 
   // Build update object, handling null values as unset
@@ -290,9 +326,14 @@ export async function deleteRecipe(
   }
 
   // Delete all likes and shares associated with this recipe
+  // Also clear forkedFrom on any recipes that were forked from this one
   await Promise.all([
     Like.deleteMany({ recipeId: recipe._id }),
     RecipeShare.deleteMany({ recipeId: recipe._id }),
+    Recipe.updateMany(
+      { "forkedFrom.recipeId": recipe._id },
+      { $unset: { forkedFrom: 1 } }
+    ),
   ]);
 
   // Delete the recipe

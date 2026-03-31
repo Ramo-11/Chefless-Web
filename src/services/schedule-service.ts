@@ -6,7 +6,7 @@ import User from "../models/User";
 import {
   notifyScheduleSuggestion,
   notifySuggestionApproved,
-  notifySuggestionDenied,
+  notifySuggestionDeniedWithData,
 } from "./notification-service";
 
 interface ServiceError extends Error {
@@ -410,11 +410,23 @@ export async function denySuggestion(
     throw createError("You do not have permission to deny suggestions", 403);
   }
 
-  // Fire-and-forget notification BEFORE deleting the entry (notification reads it)
-  notifySuggestionDenied(entryId).catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error(`Failed to send suggestion_denied notification: ${msg}`);
-  });
+  // Capture data needed for notification before deleting (avoids race condition)
+  const notificationData = entry.suggestedBy
+    ? {
+        suggestedBy: entry.suggestedBy,
+        kitchenId: entry.kitchenId,
+        kitchenName: kitchen.name,
+        scheduleEntryId: entry._id,
+      }
+    : null;
 
+  // Delete first, then notify with pre-loaded data
   await ScheduleEntry.findByIdAndDelete(entryId);
+
+  if (notificationData) {
+    notifySuggestionDeniedWithData(notificationData).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`Failed to send suggestion_denied notification: ${msg}`);
+    });
+  }
 }

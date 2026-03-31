@@ -2,6 +2,8 @@ import { Types } from "mongoose";
 import Kitchen, { IKitchen } from "../models/Kitchen";
 import User, { IUser } from "../models/User";
 import Recipe, { IRecipe } from "../models/Recipe";
+import ScheduleEntry from "../models/ScheduleEntry";
+import ShoppingList from "../models/ShoppingList";
 import {
   notifyKitchenJoined,
   notifyKitchenRemoved,
@@ -22,20 +24,21 @@ function createError(message: string, statusCode: number): ServiceError {
 function generateInviteCode(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let code = "CHEF-";
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return code;
 }
 
+const MAX_INVITE_CODE_RETRIES = 10;
+
 async function generateUniqueInviteCode(): Promise<string> {
-  let code = generateInviteCode();
-  let exists = await Kitchen.findOne({ inviteCode: code }).lean();
-  while (exists) {
-    code = generateInviteCode();
-    exists = await Kitchen.findOne({ inviteCode: code }).lean();
+  for (let attempt = 0; attempt < MAX_INVITE_CODE_RETRIES; attempt++) {
+    const code = generateInviteCode();
+    const exists = await Kitchen.findOne({ inviteCode: code }).lean();
+    if (!exists) return code;
   }
-  return code;
+  throw createError("Failed to generate a unique invite code. Please try again.", 500);
 }
 
 interface KitchenMember {
@@ -160,6 +163,12 @@ export async function deleteKitchen(userId: string): Promise<void> {
   if (!kitchen.leadId.equals(userId)) {
     throw createError("Only the kitchen lead can delete the kitchen", 403);
   }
+
+  // Clean up all kitchen-related data before deleting
+  await Promise.all([
+    ScheduleEntry.deleteMany({ kitchenId: kitchen._id }),
+    ShoppingList.deleteMany({ kitchenId: kitchen._id }),
+  ]);
 
   // Clear kitchenId for all members
   await User.updateMany(
@@ -397,6 +406,22 @@ export async function updatePermissions(
     throw createError("Only the kitchen lead can update permissions", 403);
   }
 
+  // Verify all user IDs belong to actual kitchen members
+  const allProvidedIds = [
+    ...(permissions.membersWithScheduleEdit ?? []),
+    ...(permissions.membersWithApprovalPower ?? []),
+  ];
+
+  if (allProvidedIds.length > 0) {
+    const memberCount = await User.countDocuments({
+      _id: { $in: allProvidedIds.map((id) => new Types.ObjectId(id)) },
+      kitchenId: kitchen._id,
+    });
+    if (memberCount !== allProvidedIds.length) {
+      throw createError("One or more users are not members of this kitchen", 400);
+    }
+  }
+
   const updateFields: Record<string, Types.ObjectId[]> = {};
 
   if (permissions.membersWithScheduleEdit !== undefined) {
@@ -471,6 +496,7 @@ export async function getKitchenRecipes(
   const filter = {
     authorId: { $in: memberIds },
     isPrivate: false,
+    isHidden: { $ne: true },
   };
 
   const [data, total] = await Promise.all([

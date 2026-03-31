@@ -84,7 +84,7 @@ router.get(
     const { q } = req.query as z.infer<typeof searchQuerySchema>;
 
     const users = await User.find(
-      { $text: { $search: q } },
+      { $text: { $search: q }, isBanned: { $ne: true } },
       { score: { $meta: "textScore" } }
     )
       .select("fullName profilePicture bio isPublic recipesCount followersCount")
@@ -111,7 +111,7 @@ router.get(
     const user = await User.findOne({ firebaseUid }).select("_id").lean();
 
     if (!user) {
-      res.status(404).json({ error: "User not found" });
+      res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
 
@@ -134,7 +134,7 @@ router.get(
     const user = await User.findOne({ firebaseUid }).select("_id").lean();
 
     if (!user) {
-      res.status(404).json({ error: "User not found" });
+      res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
 
@@ -151,18 +151,20 @@ router.get(
 router.get(
   "/me/requests",
   requireAuth,
+  validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const firebaseUid = req.user!.uid;
     const user = await User.findOne({ firebaseUid }).select("_id").lean();
 
     if (!user) {
-      res.status(404).json({ error: "User not found" });
+      res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
 
-    const requests = await getPendingRequests(user._id.toString());
+    const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
+    const result = await getPendingRequests(user._id.toString(), page, limit);
 
-    res.status(200).json({ requests });
+    res.status(200).json(result);
   })
 );
 
@@ -344,19 +346,52 @@ router.get(
       typeof paginationSchema
     >;
 
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(401).json({ error: "User not found. Please register first." });
+      return;
+    }
+
     const targetUser = await User.findById(id)
-      .select("_id fullName profilePicture")
+      .select("_id fullName profilePicture isPublic kitchenId")
       .lean();
     if (!targetUser) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
+    // Enforce visibility rules matching canViewRecipe
+    const isSelf = currentUser._id.equals(id);
+    if (!isSelf) {
+      if (!targetUser.isPublic) {
+        // Check if requester follows the target
+        const follow = await (await import("../models/Follow")).default.findOne({
+          followerId: currentUser._id,
+          followingId: targetUser._id,
+          status: "active",
+        }).lean();
+
+        // Check if they share a kitchen
+        const viewer = await User.findById(currentUser._id).select("kitchenId").lean();
+        const sameKitchen =
+          targetUser.kitchenId &&
+          viewer?.kitchenId &&
+          targetUser.kitchenId.equals(viewer.kitchenId);
+
+        if (!follow && !sameKitchen) {
+          res.status(403).json({ error: "This account is private." });
+          return;
+        }
+      }
+    }
+
     const skip = (page - 1) * limit;
     const query = {
       authorId: targetUser._id,
-      isPrivate: false,
-      isHidden: false,
+      isPrivate: isSelf ? undefined : false,
+      isHidden: { $ne: true },
     };
 
     const [recipes, total] = await Promise.all([

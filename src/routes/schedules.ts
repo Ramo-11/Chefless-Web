@@ -48,12 +48,27 @@ const dateString = z
     return date;
   });
 
+const MAX_SCHEDULE_RANGE_DAYS = 90;
+
 // --- Schemas ---
 
-const getEntriesSchema = z.object({
-  start: dateString,
-  end: dateString,
-});
+const getEntriesSchema = z
+  .object({
+    start: dateString,
+    end: dateString,
+  })
+  .refine((data) => data.end >= data.start, {
+    message: "end must be on or after start",
+    path: ["end"],
+  })
+  .refine(
+    (data) => {
+      const diffMs = data.end.getTime() - data.start.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      return diffDays <= MAX_SCHEDULE_RANGE_DAYS;
+    },
+    { message: `Date range cannot exceed ${MAX_SCHEDULE_RANGE_DAYS} days`, path: ["end"] }
+  );
 
 const addEntrySchema = z
   .object({

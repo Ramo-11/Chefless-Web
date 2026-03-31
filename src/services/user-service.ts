@@ -1,6 +1,14 @@
 import { Types } from "mongoose";
 import User, { IUser } from "../models/User";
 import Follow, { IFollow } from "../models/Follow";
+import Recipe from "../models/Recipe";
+import Like from "../models/Like";
+import RecipeShare from "../models/RecipeShare";
+import Notification from "../models/Notification";
+import ShoppingList from "../models/ShoppingList";
+import ScheduleEntry from "../models/ScheduleEntry";
+import Kitchen from "../models/Kitchen";
+import admin from "firebase-admin";
 import { canViewProfile } from "./visibility-service";
 import {
   notifyNewFollower,
@@ -74,6 +82,16 @@ export async function getUserById(
   }
 
   const userObj = user.toObject() as unknown as Record<string, unknown>;
+  // Strip sensitive fields before returning to a third-party requester
+  const isOwnProfile = requesterId && user._id.toString() === requesterId;
+  if (!isOwnProfile) {
+    delete userObj.fcmToken;
+    delete userObj.shippingAddress;
+    delete userObj.banReason;
+    delete userObj.bannedAt;
+    delete userObj.notificationPreferences;
+    delete userObj.isAdmin;
+  }
   return { ...userObj, spatulaBadge: badge };
 }
 
@@ -103,15 +121,15 @@ export async function updateProfile(
 export async function deleteAccount(userId: string): Promise<void> {
   const objectId = new Types.ObjectId(userId);
 
+  // Load the user to get their firebaseUid and kitchenId
+  const user = await User.findById(userId).select("firebaseUid kitchenId").lean();
+  if (!user) return;
+
   // Get the user to determine counter adjustments
-  const followsAsFollower = await Follow.find({
-    followerId: objectId,
-    status: "active",
-  }).lean();
-  const followsAsFollowing = await Follow.find({
-    followingId: objectId,
-    status: "active",
-  }).lean();
+  const [followsAsFollower, followsAsFollowing] = await Promise.all([
+    Follow.find({ followerId: objectId, status: "active" }).lean(),
+    Follow.find({ followingId: objectId, status: "active" }).lean(),
+  ]);
 
   // Decrement followersCount for users this person was following
   if (followsAsFollower.length > 0) {
@@ -136,8 +154,57 @@ export async function deleteAccount(userId: string): Promise<void> {
     $or: [{ followerId: objectId }, { followingId: objectId }],
   });
 
+  // Delete all recipes (and their associated likes/shares)
+  const userRecipes = await Recipe.find({ authorId: objectId }).select("_id").lean();
+  if (userRecipes.length > 0) {
+    const recipeIds = userRecipes.map((r) => r._id);
+    await Promise.all([
+      Like.deleteMany({ recipeId: { $in: recipeIds } }),
+      RecipeShare.deleteMany({ recipeId: { $in: recipeIds } }),
+      // Clear forkedFrom on any recipe that was forked from this user's recipes
+      Recipe.updateMany(
+        { "forkedFrom.recipeId": { $in: recipeIds } },
+        { $unset: { forkedFrom: 1 } }
+      ),
+    ]);
+    await Recipe.deleteMany({ authorId: objectId });
+  }
+
+  // Remove user from their kitchen
+  if (user.kitchenId) {
+    await Kitchen.updateOne(
+      { _id: user.kitchenId },
+      {
+        $inc: { memberCount: -1 },
+        $pull: {
+          membersWithScheduleEdit: objectId,
+          membersWithApprovalPower: objectId,
+        },
+      }
+    );
+  }
+
+  // Delete notifications, shopping list entries, and schedule entries
+  await Promise.all([
+    Notification.deleteMany({ userId: objectId }),
+    ShoppingList.deleteMany({ userId: objectId }),
+    ScheduleEntry.deleteMany({ suggestedBy: objectId }),
+    RecipeShare.deleteMany({ $or: [{ senderId: objectId }, { recipientId: objectId }] }),
+  ]);
+
   // Delete the user document from MongoDB
   await User.findByIdAndDelete(userId);
+
+  // Delete the Firebase Auth user (best-effort — client may have already deleted it)
+  try {
+    await admin.auth().deleteUser(user.firebaseUid);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // USER_NOT_FOUND is fine — Firebase account may already be gone
+    if (!msg.includes("USER_NOT_FOUND")) {
+      console.error(`Failed to delete Firebase Auth user: ${msg}`);
+    }
+  }
 }
 
 export async function getFollowers(
@@ -195,19 +262,30 @@ export async function getFollowing(
 }
 
 export async function getPendingRequests(
-  userId: string
-): Promise<FollowRecord[]> {
+  userId: string,
+  page: number,
+  limit: number
+): Promise<PaginatedResult> {
   const objectId = new Types.ObjectId(userId);
+  const skip = (page - 1) * limit;
 
-  const requests = await Follow.find({
-    followingId: objectId,
-    status: "pending",
-  })
-    .populate("followerId", "fullName profilePicture")
-    .sort({ createdAt: -1 })
-    .lean<FollowRecord[]>();
+  const [data, total] = await Promise.all([
+    Follow.find({ followingId: objectId, status: "pending" })
+      .populate("followerId", "fullName profilePicture")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean<FollowRecord[]>(),
+    Follow.countDocuments({ followingId: objectId, status: "pending" }),
+  ]);
 
-  return requests;
+  return {
+    data,
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
+  };
 }
 
 export async function followUser(

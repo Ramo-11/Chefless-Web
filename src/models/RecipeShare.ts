@@ -38,8 +38,17 @@ const recipeShareSchema = new Schema<IRecipeShare>(
   }
 );
 
-// For checking duplicate shares
-recipeShareSchema.index({ senderId: 1, recipientId: 1, recipeId: 1 });
+// Unique index to prevent duplicate shares of the same recipe between same users
+recipeShareSchema.index(
+  { senderId: 1, recipientId: 1, recipeId: 1 },
+  { unique: true }
+);
+
+// TTL: auto-delete shares older than 180 days
+recipeShareSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 180 * 24 * 60 * 60 }
+);
 
 const RecipeShare =
   (mongoose.models.RecipeShare as mongoose.Model<IRecipeShare>) ||

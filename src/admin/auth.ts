@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import AdminUser from "../models/AdminUser";
+import { generateCsrfToken } from "../middleware/csrf";
 
 export async function loginPage(req: Request, res: Response): Promise<void> {
   if (req.session.adminId) {
     res.redirect("/admin");
     return;
   }
-  res.render("login", { error: null });
+  res.render("login", { error: null, csrfToken: generateCsrfToken(req) });
 }
 
 export async function loginPost(req: Request, res: Response): Promise<void> {

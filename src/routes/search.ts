@@ -96,17 +96,12 @@ interface KitchenSearchResult {
 // ── Visibility ──────────────────────────────────────────────────────────────
 
 /**
- * Build the recipe visibility filter for a given viewer.
- *
- * Rules:
- * 1. Own recipes (including private) — always visible
- * 2. Shared (non-private) recipes from public, non-banned accounts — visible
- * 3. Shared recipes from private accounts the viewer follows or shares a kitchen with — visible
+ * Returns the accessible private author IDs (follows + kitchen members)
+ * for the viewer. Does NOT load all public/banned user IDs into memory.
  */
-async function buildRecipeVisibilityFilter(
+async function buildAccessiblePrivateIds(
   viewerId: Types.ObjectId
-): Promise<Record<string, unknown>> {
-  // IDs of users the viewer actively follows
+): Promise<Types.ObjectId[]> {
   const follows = await Follow.find({
     followerId: viewerId,
     status: "active",
@@ -115,7 +110,6 @@ async function buildRecipeVisibilityFilter(
     .lean();
   const followedIds = follows.map((f) => f.followingId);
 
-  // IDs of kitchen members (if viewer is in a kitchen)
   const viewer = await User.findById(viewerId).select("kitchenId").lean();
   let kitchenMemberIds: Types.ObjectId[] = [];
   if (viewer?.kitchenId) {
@@ -128,28 +122,20 @@ async function buildRecipeVisibilityFilter(
     kitchenMemberIds = members.map((m) => m._id);
   }
 
-  const accessiblePrivateIds = [...followedIds, ...kitchenMemberIds];
+  return [...followedIds, ...kitchenMemberIds];
+}
 
-  // IDs of public, non-banned users
-  const publicUsers = await User.find({
-    isPublic: true,
-    isBanned: { $ne: true },
-  })
-    .select("_id")
-    .lean();
-  const publicIds = publicUsers.map((u) => u._id);
-
-  // IDs of banned users (to exclude as recipe authors)
-  const bannedUsers = await User.find({ isBanned: true })
-    .select("_id")
-    .lean();
-  const bannedIds = bannedUsers.map((u) => u._id);
-
+/**
+ * Returns aggregation pipeline stages that enforce recipe visibility using
+ * $lookup on the author document instead of loading all public/banned IDs.
+ */
+function buildRecipeVisibilityStages(
+  viewerId: Types.ObjectId,
+  accessiblePrivateIds: Types.ObjectId[]
+): Record<string, unknown>[] {
   const orClauses: Record<string, unknown>[] = [
-    // Own recipes
-    { authorId: viewerId },
-    // Shared recipes from public accounts
-    { isPrivate: false, authorId: { $in: publicIds } },
+    { authorId: viewerId }, // own recipes (including private)
+    { isPrivate: false, "_author.isPublic": true }, // public account
   ];
 
   if (accessiblePrivateIds.length > 0) {
@@ -159,15 +145,26 @@ async function buildRecipeVisibilityFilter(
     });
   }
 
-  return {
-    $and: [
-      { $or: orClauses },
-      { isHidden: { $ne: true } },
-      ...(bannedIds.length > 0
-        ? [{ authorId: { $nin: bannedIds } }]
-        : []),
-    ],
-  };
+  return [
+    {
+      $lookup: {
+        from: "users",
+        localField: "authorId",
+        foreignField: "_id",
+        as: "_author",
+        pipeline: [{ $project: { isPublic: 1, isBanned: 1 } }],
+      },
+    },
+    { $unwind: "$_author" },
+    {
+      $match: {
+        "_author.isBanned": { $ne: true },
+        isHidden: { $ne: true },
+        $or: orClauses,
+      },
+    },
+    { $project: { _author: 0 } },
+  ];
 }
 
 // ── Search Functions ────────────────────────────────────────────────────────
@@ -197,14 +194,12 @@ async function searchRecipes(
     })),
   };
 
-  const visibilityFilter = await buildRecipeVisibilityFilter(viewerId);
-
-  const matchFilter = {
-    $and: [termFilter, visibilityFilter],
-  };
+  const accessiblePrivateIds = await buildAccessiblePrivateIds(viewerId);
 
   const pipeline = [
-    { $match: matchFilter },
+    { $match: termFilter },
+    // Enforce visibility via $lookup instead of loading all public user IDs
+    ...buildRecipeVisibilityStages(viewerId, accessiblePrivateIds),
     // Relevance scoring: title match quality + engagement
     {
       $addFields: {
@@ -341,15 +336,11 @@ async function searchUsers(
 
   const escapedTerms = terms.map(escapeRegex);
   const fullQueryEscaped = escapeRegex(query.trim());
-  const looksLikeEmail = query.includes("@");
 
-  // Every term must match name or email
+  // Search by name only — email is a sensitive field and must not be exposed
   const termFilter = {
     $and: escapedTerms.map((term) => ({
-      $or: [
-        { fullName: { $regex: term, $options: "i" } },
-        { email: { $regex: term, $options: "i" } },
-      ],
+      fullName: { $regex: term, $options: "i" },
     })),
   };
 
@@ -392,20 +383,6 @@ async function searchUsers(
                   },
                 },
                 50,
-                0,
-              ],
-            },
-            // Email match (weighted higher if query looks like an email)
-            {
-              $cond: [
-                {
-                  $regexMatch: {
-                    input: "$email",
-                    regex: fullQueryEscaped,
-                    options: "i",
-                  },
-                },
-                looksLikeEmail ? 200 : 10,
                 0,
               ],
             },

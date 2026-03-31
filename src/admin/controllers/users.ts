@@ -1,5 +1,26 @@
 import { Request, Response } from "express";
 import User from "../../models/User";
+import AuditLog from "../../models/AuditLog";
+
+async function audit(
+  req: Request,
+  action: string,
+  targetType: string,
+  targetId?: string,
+  details?: Record<string, unknown>
+): Promise<void> {
+  AuditLog.create({
+    adminId: req.session.adminId ?? "unknown",
+    adminEmail: req.session.adminEmail ?? "unknown",
+    action,
+    targetType,
+    targetId,
+    details,
+    ipAddress: req.ip,
+  }).catch((err: unknown) => {
+    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+  });
+}
 
 export async function usersPage(req: Request, res: Response): Promise<void> {
   try {
@@ -82,6 +103,7 @@ export async function banUser(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    await audit(req, "ban_user", "user", req.params.id, { reason });
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to ban user:", error);
@@ -105,6 +127,7 @@ export async function unbanUser(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    await audit(req, "unban_user", "user", req.params.id);
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to unban user:", error);

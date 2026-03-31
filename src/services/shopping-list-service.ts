@@ -375,6 +375,11 @@ export async function addItem(
 
   await assertListAccess(list, userId);
 
+  const MAX_ITEMS = 500;
+  if (list.items.length >= MAX_ITEMS) {
+    throw createError(`Shopping lists are limited to ${MAX_ITEMS} items.`, 400);
+  }
+
   const newItem = {
     name: item.name,
     quantity: item.quantity,

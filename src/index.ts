@@ -33,8 +33,11 @@ app.set("views", path.join(__dirname, "views"));
 app.use(express.static(path.join(__dirname, "public")));
 
 // ── Core middleware ─────────────────────────────────────────────────
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(cors({
+  methods: ["GET", "POST", "PATCH", "DELETE"],
+  allowedHeaders: ["Authorization", "Content-Type"],
+}));
+app.use(express.json({ limit: "50kb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(defaultLimiter);
 
@@ -70,8 +73,9 @@ app.use("/api/webhooks", webhooksRouter);
 // ── API routes ──────────────────────────────────────────────────────
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
-app.use("/api/users", usersRouter);
-app.use("/api/recipes", recipesRouter);
+// Upload routes need a higher body limit for base64 image data
+app.use("/api/users", express.json({ limit: "10mb" }), usersRouter);
+app.use("/api/recipes", express.json({ limit: "10mb" }), recipesRouter);
 app.use("/api/kitchens", kitchensRouter);
 app.use("/api/schedule", scheduleRouter);
 app.use("/api/shopping-lists", shoppingListsRouter);

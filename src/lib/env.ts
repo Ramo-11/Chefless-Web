@@ -9,10 +9,8 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().min(1, "CLOUDINARY_API_SECRET is required"),
   FIREBASE_PROJECT_ID: z.string().min(1, "FIREBASE_PROJECT_ID is required"),
   FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
-  REVENUECAT_WEBHOOK_SECRET: z.string().default(""),
-  SESSION_SECRET: z
-    .string()
-    .transform((val) => val || "chefless-admin-dev-secret-change-in-prod"),
+  REVENUECAT_WEBHOOK_SECRET: z.string().min(1, "REVENUECAT_WEBHOOK_SECRET is required"),
+  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
 });
 
 type Env = z.infer<typeof envSchema>;
