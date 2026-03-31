@@ -272,7 +272,7 @@ export async function forYouFeed(
         pipeline: [{ $project: { isPremium: 1 } }],
       },
     },
-    { $unwind: { path: "$_authorFull", preserveNullAndEmpty: false } },
+    { $unwind: { path: "$_authorFull", preserveNullAndEmptyArrays: false } },
     // Compute scoring components
     {
       $addFields: {
