@@ -37,6 +37,7 @@
           <th>Followers</th>
           <th>Status</th>
           <th>Joined</th>
+          <th>Last Active</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -75,10 +76,14 @@
             </div>
           </td>
           <td class="text-muted"><%= new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></td>
+          <td class="text-muted"><%= user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never' %></td>
           <td>
             <div class="action-buttons">
               <button class="btn btn-sm btn-secondary" onclick="viewUser('<%= user._id %>')" aria-label="View user details">
                 <i class="fas fa-eye"></i>
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="editUser('<%= user._id %>')" aria-label="Edit user">
+                <i class="fas fa-pencil-alt"></i>
               </button>
               <% if (!user.isBanned) { %>
                 <button class="btn btn-sm btn-danger-outline" onclick="showBanModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Ban user">
@@ -95,7 +100,7 @@
         <% }); %>
         <% if (users.length === 0) { %>
         <tr>
-          <td colspan="7" class="empty-state">
+          <td colspan="8" class="empty-state">
             <i class="fas fa-search"></i>
             <span>No users found</span>
           </td>
@@ -145,8 +150,71 @@
   </div>
 </div>
 
+<!-- Edit User Modal -->
+<div class="modal" id="edit-user-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Edit User</h2>
+      <button class="modal-close" onclick="closeModal('edit-user-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="edit-user-fullName">Full Name</label>
+        <input type="text" id="edit-user-fullName">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-email">Email</label>
+        <input type="email" id="edit-user-email">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-bio">Bio</label>
+        <textarea id="edit-user-bio" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="edit-user-phone">Phone</label>
+        <input type="text" id="edit-user-phone">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-profilePicture">Profile Picture URL</label>
+        <input type="url" id="edit-user-profilePicture">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-signature">Signature URL</label>
+        <input type="url" id="edit-user-signature">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-isPublic">Profile Visibility</label>
+        <select id="edit-user-isPublic">
+          <option value="true">Public</option>
+          <option value="false">Private</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="edit-user-dietaryPreferences">Dietary Preferences (comma-separated)</label>
+        <input type="text" id="edit-user-dietaryPreferences" placeholder="e.g. Vegan, Gluten-Free">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-cuisinePreferences">Cuisine Preferences (comma-separated)</label>
+        <input type="text" id="edit-user-cuisinePreferences" placeholder="e.g. Italian, Japanese">
+      </div>
+      <div class="form-group">
+        <label for="edit-user-onboardingComplete">Onboarding Complete</label>
+        <select id="edit-user-onboardingComplete">
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('edit-user-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUser()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <script>
   let banUserId = null;
+  let editUserId = null;
 
   function viewUser(id) {
     openModal('user-detail-modal');
@@ -215,6 +283,56 @@
       toastAndReload('User unbanned successfully');
     })
     .catch(() => showToast('Failed to unban user', 'error'));
+  }
+
+  function editUser(id) {
+    editUserId = id;
+    openModal('edit-user-modal');
+    adminFetch('/admin/api/users/' + id)
+      .then(data => {
+        const u = data.user;
+        document.getElementById('edit-user-fullName').value = u.fullName || '';
+        document.getElementById('edit-user-email').value = u.email || '';
+        document.getElementById('edit-user-bio').value = u.bio || '';
+        document.getElementById('edit-user-phone').value = u.phone || '';
+        document.getElementById('edit-user-profilePicture').value = u.profilePicture || '';
+        document.getElementById('edit-user-signature').value = u.signature || '';
+        document.getElementById('edit-user-isPublic').value = u.isPublic ? 'true' : 'false';
+        document.getElementById('edit-user-dietaryPreferences').value = (u.dietaryPreferences || []).join(', ');
+        document.getElementById('edit-user-cuisinePreferences').value = (u.cuisinePreferences || []).join(', ');
+        document.getElementById('edit-user-onboardingComplete').value = u.onboardingComplete ? 'true' : 'false';
+      })
+      .catch(() => {
+        closeModal('edit-user-modal');
+        showToast('Failed to load user details', 'error');
+      });
+  }
+
+  function saveUser() {
+    if (!editUserId) return;
+    const data = {
+      fullName: document.getElementById('edit-user-fullName').value,
+      email: document.getElementById('edit-user-email').value,
+      bio: document.getElementById('edit-user-bio').value,
+      phone: document.getElementById('edit-user-phone').value,
+      profilePicture: document.getElementById('edit-user-profilePicture').value,
+      signature: document.getElementById('edit-user-signature').value,
+      isPublic: document.getElementById('edit-user-isPublic').value === 'true',
+      dietaryPreferences: document.getElementById('edit-user-dietaryPreferences').value
+        .split(',').map(s => s.trim()).filter(Boolean),
+      cuisinePreferences: document.getElementById('edit-user-cuisinePreferences').value
+        .split(',').map(s => s.trim()).filter(Boolean),
+      onboardingComplete: document.getElementById('edit-user-onboardingComplete').value === 'true',
+    };
+    adminFetch('/admin/api/users/' + editUserId, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+    .then(() => {
+      closeModal('edit-user-modal');
+      toastAndReload('User updated');
+    })
+    .catch(() => showToast('Failed to update user', 'error'));
   }
 </script>
 

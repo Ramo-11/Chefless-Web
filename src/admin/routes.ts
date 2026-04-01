@@ -1,16 +1,17 @@
 import { Router } from "express";
 import expressLayouts from "express-ejs-layouts";
-import { requireAdminSession } from "../middleware/adminSession";
+import { requireAdminSession, requireSuperAdmin } from "../middleware/adminSession";
 import { authLimiter } from "../middleware/rateLimit";
 import { csrfProtection } from "../middleware/csrf";
 import { loginPage, loginPost, logout } from "./auth";
 import { dashboardPage } from "./controllers/dashboard";
-import { usersPage, userDetail, banUser, unbanUser } from "./controllers/users";
+import { usersPage, userDetail, banUser, unbanUser, updateUser } from "./controllers/users";
 import {
   recipesPage,
   toggleHideRecipe,
   deleteRecipe,
   recipeDetail,
+  updateRecipe,
 } from "./controllers/recipes";
 import {
   reportsPage,
@@ -26,6 +27,21 @@ import {
   tagRecipe,
   untagRecipe,
 } from "./controllers/seasonal";
+import {
+  kitchensPage,
+  kitchenDetail,
+  updateKitchen,
+  removeKitchenMember,
+  transferKitchenLead,
+  deleteKitchen,
+} from "./controllers/kitchens";
+import {
+  adminsPage,
+  createAdmin,
+  updateAdmin,
+  toggleAdminActive,
+  resetAdminPassword,
+} from "./controllers/admins";
 
 const router = Router();
 
@@ -41,8 +57,10 @@ router.use(requireAdminSession);
 router.get("/api/users/:id", userDetail);
 router.post("/api/users/:id/ban", csrfProtection, banUser);
 router.post("/api/users/:id/unban", csrfProtection, unbanUser);
+router.put("/api/users/:id", csrfProtection, updateUser);
 router.get("/api/recipes/:id", recipeDetail);
 router.post("/api/recipes/:id/toggle-hide", csrfProtection, toggleHideRecipe);
+router.put("/api/recipes/:id", csrfProtection, updateRecipe);
 router.delete("/api/recipes/:id", csrfProtection, deleteRecipe);
 router.post("/api/reports/:id/review", csrfProtection, reviewReport);
 router.post("/api/reports/:id/dismiss", csrfProtection, dismissReport);
@@ -54,6 +72,17 @@ router.post("/api/seasonal/tags/:id/toggle", csrfProtection, toggleTag);
 router.delete("/api/seasonal/tags/:id", csrfProtection, deleteTag);
 router.post("/api/seasonal/tag-recipe", csrfProtection, tagRecipe);
 router.post("/api/seasonal/untag-recipe", csrfProtection, untagRecipe);
+router.get("/api/kitchens/:id", kitchenDetail);
+router.put("/api/kitchens/:id", csrfProtection, updateKitchen);
+router.post("/api/kitchens/:id/remove-member", csrfProtection, removeKitchenMember);
+router.post("/api/kitchens/:id/transfer-lead", csrfProtection, transferKitchenLead);
+router.delete("/api/kitchens/:id", csrfProtection, deleteKitchen);
+
+// ── Admin management API routes (super admin only) ─────────────────
+router.post("/api/admins", requireSuperAdmin, csrfProtection, createAdmin);
+router.put("/api/admins/:id", requireSuperAdmin, csrfProtection, updateAdmin);
+router.post("/api/admins/:id/toggle-active", requireSuperAdmin, csrfProtection, toggleAdminActive);
+router.post("/api/admins/:id/reset-password", requireSuperAdmin, csrfProtection, resetAdminPassword);
 
 // ── Page routes (with layout) ──────────────────────────────────────
 router.use(expressLayouts);
@@ -63,5 +92,7 @@ router.get("/recipes", recipesPage);
 router.get("/reports", reportsPage);
 router.get("/labels", labelsPage);
 router.get("/seasonal", seasonalPage);
+router.get("/kitchens", kitchensPage);
+router.get("/admins", requireSuperAdmin, adminsPage);
 
 export default router;

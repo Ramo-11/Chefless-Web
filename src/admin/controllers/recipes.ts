@@ -135,3 +135,47 @@ export async function recipeDetail(
     res.status(500).json({ error: "Failed to load recipe" });
   }
 }
+
+export async function updateRecipe(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const allowedFields = [
+      "title",
+      "description",
+      "dietaryTags",
+      "cuisineTags",
+      "prepTime",
+      "cookTime",
+      "servings",
+      "calories",
+      "costEstimate",
+      "isPrivate",
+    ] as const;
+
+    const sanitized: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        sanitized[field] = req.body[field];
+      }
+    }
+
+    const recipe = await Recipe.findByIdAndUpdate(
+      req.params.id,
+      { $set: sanitized },
+      { new: true, runValidators: true }
+    );
+
+    if (!recipe) {
+      res.status(404).json({ error: "Recipe not found" });
+      return;
+    }
+
+    await audit(req, "update_recipe", "recipe", req.params.id as string, sanitized);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to update recipe:", error);
+    res.status(500).json({ error: "Failed to update recipe" });
+  }
+}

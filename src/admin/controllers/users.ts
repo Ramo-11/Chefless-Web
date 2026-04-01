@@ -50,7 +50,7 @@ export async function usersPage(req: Request, res: Response): Promise<void> {
         .skip(skip)
         .limit(limit)
         .select(
-          "fullName email profilePicture isPremium isBanned isAdmin recipesCount followersCount followingCount createdAt"
+          "fullName email profilePicture isPremium isBanned isAdmin recipesCount followersCount followingCount createdAt lastActiveAt isPublic"
         )
         .lean(),
       User.countDocuments(query),
@@ -132,5 +132,46 @@ export async function unbanUser(req: Request, res: Response): Promise<void> {
   } catch (error) {
     console.error("Failed to unban user:", error);
     res.status(500).json({ error: "Failed to unban user" });
+  }
+}
+
+export async function updateUser(req: Request, res: Response): Promise<void> {
+  try {
+    const allowedFields = [
+      "fullName",
+      "email",
+      "bio",
+      "phone",
+      "profilePicture",
+      "signature",
+      "isPublic",
+      "dietaryPreferences",
+      "cuisinePreferences",
+      "onboardingComplete",
+    ] as const;
+
+    const sanitized: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        sanitized[field] = req.body[field];
+      }
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { $set: sanitized },
+      { new: true, runValidators: true }
+    );
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    await audit(req, "update_user", "user", req.params.id as string, sanitized);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to update user:", error);
+    res.status(500).json({ error: "Failed to update user" });
   }
 }

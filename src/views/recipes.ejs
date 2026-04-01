@@ -92,6 +92,9 @@
               <button class="btn btn-sm btn-secondary" onclick="viewRecipe('<%= recipe._id %>')" aria-label="View recipe">
                 <i class="fas fa-eye"></i>
               </button>
+              <button class="btn btn-sm btn-secondary" onclick="editRecipe('<%= recipe._id %>')" aria-label="Edit recipe">
+                <i class="fas fa-pencil-alt"></i>
+              </button>
               <button class="btn btn-sm <%= recipe.isHidden ? 'btn-success-outline' : 'btn-warning-outline' %>"
                       onclick="toggleHide('<%= recipe._id %>')"
                       aria-label="<%= recipe.isHidden ? 'Show' : 'Hide' %> recipe">
@@ -134,7 +137,73 @@
   </div>
 </div>
 
+<!-- Edit Recipe Modal -->
+<div class="modal" id="edit-recipe-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Edit Recipe</h2>
+      <button class="modal-close" onclick="closeModal('edit-recipe-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="edit-recipe-title">Title</label>
+        <input type="text" id="edit-recipe-title">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-description">Description</label>
+        <textarea id="edit-recipe-description" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-dietaryTags">Dietary Tags (comma-separated)</label>
+        <input type="text" id="edit-recipe-dietaryTags" placeholder="e.g. Vegan, Gluten-Free">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-cuisineTags">Cuisine Tags (comma-separated)</label>
+        <input type="text" id="edit-recipe-cuisineTags" placeholder="e.g. Italian, Japanese">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-prepTime">Prep Time (minutes)</label>
+        <input type="number" id="edit-recipe-prepTime" min="0">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-cookTime">Cook Time (minutes)</label>
+        <input type="number" id="edit-recipe-cookTime" min="0">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-servings">Servings</label>
+        <input type="number" id="edit-recipe-servings" min="1">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-calories">Calories</label>
+        <input type="number" id="edit-recipe-calories" min="0">
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-costEstimate">Cost Estimate</label>
+        <select id="edit-recipe-costEstimate">
+          <option value="">None</option>
+          <option value="budget">Budget</option>
+          <option value="moderate">Moderate</option>
+          <option value="expensive">Expensive</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="edit-recipe-isPrivate">Visibility</label>
+        <select id="edit-recipe-isPrivate">
+          <option value="false">Public</option>
+          <option value="true">Private</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('edit-recipe-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRecipe()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <script>
+  let editRecipeId = null;
+
   function viewRecipe(id) {
     openModal('recipe-detail-modal');
     document.getElementById('recipe-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
@@ -192,6 +261,56 @@
         toastAndReload('Recipe deleted');
       })
       .catch(() => showToast('Failed to delete recipe', 'error'));
+  }
+
+  function editRecipe(id) {
+    editRecipeId = id;
+    openModal('edit-recipe-modal');
+    adminFetch('/admin/api/recipes/' + id)
+      .then(data => {
+        const r = data.recipe;
+        document.getElementById('edit-recipe-title').value = r.title || '';
+        document.getElementById('edit-recipe-description').value = r.description || '';
+        document.getElementById('edit-recipe-dietaryTags').value = (r.dietaryTags || []).join(', ');
+        document.getElementById('edit-recipe-cuisineTags').value = (r.cuisineTags || []).join(', ');
+        document.getElementById('edit-recipe-prepTime').value = r.prepTime || '';
+        document.getElementById('edit-recipe-cookTime').value = r.cookTime || '';
+        document.getElementById('edit-recipe-servings').value = r.baseServings || r.servings || '';
+        document.getElementById('edit-recipe-calories').value = r.calories || '';
+        document.getElementById('edit-recipe-costEstimate').value = r.costEstimate || '';
+        document.getElementById('edit-recipe-isPrivate').value = r.isPrivate ? 'true' : 'false';
+      })
+      .catch(() => {
+        closeModal('edit-recipe-modal');
+        showToast('Failed to load recipe details', 'error');
+      });
+  }
+
+  function saveRecipe() {
+    if (!editRecipeId) return;
+    const data = {
+      title: document.getElementById('edit-recipe-title').value,
+      description: document.getElementById('edit-recipe-description').value,
+      dietaryTags: document.getElementById('edit-recipe-dietaryTags').value
+        .split(',').map(s => s.trim()).filter(Boolean),
+      cuisineTags: document.getElementById('edit-recipe-cuisineTags').value
+        .split(',').map(s => s.trim()).filter(Boolean),
+      prepTime: parseInt(document.getElementById('edit-recipe-prepTime').value) || 0,
+      cookTime: parseInt(document.getElementById('edit-recipe-cookTime').value) || 0,
+      servings: parseInt(document.getElementById('edit-recipe-servings').value) || 1,
+      calories: parseInt(document.getElementById('edit-recipe-calories').value) || 0,
+      costEstimate: document.getElementById('edit-recipe-costEstimate').value || undefined,
+      isPrivate: document.getElementById('edit-recipe-isPrivate').value === 'true',
+    };
+    adminFetch('/admin/api/recipes/' + editRecipeId, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+    .then(() => {
+      closeModal('edit-recipe-modal');
+      toastAndReload('Recipe updated');
+    })
+    .catch(() => showToast('Failed to update recipe', 'error'));
   }
 </script>
 

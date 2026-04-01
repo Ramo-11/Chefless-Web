@@ -1,0 +1,280 @@
+<% var pageTitle = 'Admin Users'; %>
+<% var page = 'admins'; %>
+
+<div class="page-header">
+  <h1>Admin Management</h1>
+  <p class="page-subtitle"><%= admins.length %> admin<%= admins.length !== 1 ? 's' : '' %></p>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <div></div>
+  <button class="btn btn-primary" onclick="showCreateAdmin()">
+    <i class="fas fa-plus"></i> Add Admin
+  </button>
+</div>
+
+<!-- Admins Table -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Last Login</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% admins.forEach(function(admin) { %>
+        <tr data-admin-id="<%= admin._id %>">
+          <td><%= admin.name %></td>
+          <td class="text-muted"><%= admin.email %></td>
+          <td>
+            <% if (admin.role === 'super_admin') { %>
+              <span class="badge badge-warning">Super Admin</span>
+            <% } else { %>
+              <span class="badge badge-info">Admin</span>
+            <% } %>
+          </td>
+          <td>
+            <% if (admin.isActive) { %>
+              <span class="badge badge-success">Active</span>
+            <% } else { %>
+              <span class="badge badge-danger">Inactive</span>
+            <% } %>
+          </td>
+          <td class="text-muted">
+            <%= admin.lastLoginAt ? new Date(admin.lastLoginAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never' %>
+          </td>
+          <td class="text-muted">
+            <%= new Date(admin.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %>
+          </td>
+          <td>
+            <div class="action-buttons">
+              <button class="btn btn-sm btn-secondary" onclick="editAdmin('<%= admin._id %>', '<%= admin.name.replace(/'/g, "\\'") %>', '<%= admin.role %>')" aria-label="Edit admin">
+                <i class="fas fa-pencil-alt"></i>
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="toggleActive('<%= admin._id %>', '<%= admin.name.replace(/'/g, "\\'") %>', <%= admin.isActive %>)" aria-label="Toggle active status">
+                <i class="fas fa-power-off"></i>
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="showResetPassword('<%= admin._id %>', '<%= admin.name.replace(/'/g, "\\'") %>')" aria-label="Reset password">
+                <i class="fas fa-key"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+        <% }); %>
+        <% if (admins.length === 0) { %>
+        <tr>
+          <td colspan="7" class="empty-state">
+            <i class="fas fa-user-shield"></i>
+            <span>No admin users found</span>
+          </td>
+        </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Create Admin Modal -->
+<div class="modal" id="create-admin-modal">
+  <div class="modal-content modal-sm">
+    <div class="modal-header">
+      <h2>Create Admin</h2>
+      <button class="modal-close" onclick="closeModal('create-admin-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="create-name">Name</label>
+        <input type="text" id="create-name" placeholder="Full name">
+      </div>
+      <div class="form-group">
+        <label for="create-email">Email</label>
+        <input type="email" id="create-email" placeholder="admin@example.com">
+      </div>
+      <div class="form-group">
+        <label for="create-password">Password</label>
+        <input type="password" id="create-password" placeholder="Minimum 8 characters">
+      </div>
+      <div class="form-group">
+        <label for="create-role">Role</label>
+        <select id="create-role">
+          <option value="admin">Admin</option>
+          <option value="super_admin">Super Admin</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('create-admin-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createNewAdmin()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Admin Modal -->
+<div class="modal" id="edit-admin-modal">
+  <div class="modal-content modal-sm">
+    <div class="modal-header">
+      <h2>Edit Admin</h2>
+      <button class="modal-close" onclick="closeModal('edit-admin-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-admin-id">
+      <div class="form-group">
+        <label for="edit-name">Name</label>
+        <input type="text" id="edit-name">
+      </div>
+      <div class="form-group">
+        <label for="edit-role">Role</label>
+        <select id="edit-role">
+          <option value="admin">Admin</option>
+          <option value="super_admin">Super Admin</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('edit-admin-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAdmin()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div class="modal" id="reset-password-modal">
+  <div class="modal-content modal-sm">
+    <div class="modal-header">
+      <h2>Reset Password</h2>
+      <button class="modal-close" onclick="closeModal('reset-password-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="reset-admin-id">
+      <p>Reset password for <strong id="reset-admin-name"></strong></p>
+      <div class="form-group">
+        <label for="reset-new-password">New Password</label>
+        <input type="password" id="reset-new-password" placeholder="Minimum 8 characters">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('reset-password-modal')">Cancel</button>
+      <button class="btn btn-danger" onclick="resetPassword()">Reset</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showCreateAdmin() {
+    document.getElementById('create-name').value = '';
+    document.getElementById('create-email').value = '';
+    document.getElementById('create-password').value = '';
+    document.getElementById('create-role').value = 'admin';
+    openModal('create-admin-modal');
+  }
+
+  function createNewAdmin() {
+    var name = document.getElementById('create-name').value.trim();
+    var email = document.getElementById('create-email').value.trim();
+    var password = document.getElementById('create-password').value;
+    var role = document.getElementById('create-role').value;
+
+    if (!name || !email || !password || !role) {
+      showToast('All fields are required', 'error');
+      return;
+    }
+    if (password.length < 8) {
+      showToast('Password must be at least 8 characters', 'error');
+      return;
+    }
+
+    adminFetch('/admin/api/admins', {
+      method: 'POST',
+      body: JSON.stringify({ name: name, email: email, password: password, role: role })
+    })
+    .then(function() {
+      closeModal('create-admin-modal');
+      toastAndReload('Admin created successfully');
+    })
+    .catch(function(err) {
+      showToast(err.message || 'Failed to create admin', 'error');
+    });
+  }
+
+  function editAdmin(id, name, role) {
+    document.getElementById('edit-admin-id').value = id;
+    document.getElementById('edit-name').value = name;
+    document.getElementById('edit-role').value = role;
+    openModal('edit-admin-modal');
+  }
+
+  function saveAdmin() {
+    var id = document.getElementById('edit-admin-id').value;
+    var name = document.getElementById('edit-name').value.trim();
+    var role = document.getElementById('edit-role').value;
+
+    if (!name) {
+      showToast('Name is required', 'error');
+      return;
+    }
+
+    adminFetch('/admin/api/admins/' + id, {
+      method: 'PUT',
+      body: JSON.stringify({ name: name, role: role })
+    })
+    .then(function() {
+      closeModal('edit-admin-modal');
+      toastAndReload('Admin updated successfully');
+    })
+    .catch(function(err) {
+      showToast(err.message || 'Failed to update admin', 'error');
+    });
+  }
+
+  function toggleActive(id, name, isActive) {
+    var action = isActive ? 'deactivate' : 'activate';
+    if (!confirm('Are you sure you want to ' + action + ' ' + name + '?')) return;
+
+    adminFetch('/admin/api/admins/' + id + '/toggle-active', {
+      method: 'POST'
+    })
+    .then(function() {
+      toastAndReload('Admin ' + action + 'd successfully');
+    })
+    .catch(function(err) {
+      showToast(err.message || 'Failed to ' + action + ' admin', 'error');
+    });
+  }
+
+  function showResetPassword(id, name) {
+    document.getElementById('reset-admin-id').value = id;
+    document.getElementById('reset-admin-name').textContent = name;
+    document.getElementById('reset-new-password').value = '';
+    openModal('reset-password-modal');
+  }
+
+  function resetPassword() {
+    var id = document.getElementById('reset-admin-id').value;
+    var newPassword = document.getElementById('reset-new-password').value;
+
+    if (!newPassword || newPassword.length < 8) {
+      showToast('Password must be at least 8 characters', 'error');
+      return;
+    }
+
+    adminFetch('/admin/api/admins/' + id + '/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ newPassword: newPassword })
+    })
+    .then(function() {
+      closeModal('reset-password-modal');
+      showToast('Password reset successfully', 'success');
+    })
+    .catch(function(err) {
+      showToast(err.message || 'Failed to reset password', 'error');
+    });
+  }
+</script>

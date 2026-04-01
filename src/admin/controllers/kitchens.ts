@@ -1,0 +1,240 @@
+import { Request, Response } from "express";
+import Kitchen from "../../models/Kitchen";
+import User from "../../models/User";
+import ScheduleEntry from "../../models/ScheduleEntry";
+import ShoppingList from "../../models/ShoppingList";
+import AuditLog from "../../models/AuditLog";
+
+async function audit(
+  req: Request,
+  action: string,
+  targetType: string,
+  targetId?: string,
+  details?: Record<string, unknown>
+): Promise<void> {
+  AuditLog.create({
+    adminId: req.session.adminId ?? "unknown",
+    adminEmail: req.session.adminEmail ?? "unknown",
+    action,
+    targetType,
+    targetId,
+    details,
+    ipAddress: req.ip,
+  }).catch((err: unknown) => {
+    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+  });
+}
+
+export async function kitchensPage(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = 20;
+    const search = (req.query.search as string) || "";
+
+    const query: Record<string, unknown> = {};
+
+    if (search) {
+      query.name = { $regex: search, $options: "i" };
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [kitchens, total] = await Promise.all([
+      Kitchen.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("leadId", "fullName email profilePicture")
+        .lean(),
+      Kitchen.countDocuments(query),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    res.render("kitchens", {
+      page: "kitchens",
+      pageTitle: "Kitchens",
+      kitchens,
+      pagination: { current: page, total: totalPages, totalItems: total },
+      search,
+    });
+  } catch (error) {
+    console.error("Failed to load kitchens page:", error);
+    res.status(500).send("Internal server error");
+  }
+}
+
+export async function kitchenDetail(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const kitchen = await Kitchen.findById(req.params.id)
+      .populate("leadId", "fullName email profilePicture")
+      .lean();
+
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    const members = await User.find({ kitchenId: req.params.id })
+      .select("_id fullName email profilePicture")
+      .lean();
+
+    res.json({ kitchen, members });
+  } catch (error) {
+    console.error("Failed to get kitchen detail:", error);
+    res.status(500).json({ error: "Failed to load kitchen" });
+  }
+}
+
+export async function updateKitchen(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const allowedFields = ["name", "photo"] as const;
+
+    const sanitized: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        sanitized[field] = req.body[field];
+      }
+    }
+
+    const kitchen = await Kitchen.findByIdAndUpdate(
+      req.params.id,
+      { $set: sanitized },
+      { new: true, runValidators: true }
+    );
+
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    await audit(req, "update_kitchen", "kitchen", req.params.id as string, sanitized);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to update kitchen:", error);
+    res.status(500).json({ error: "Failed to update kitchen" });
+  }
+}
+
+export async function removeKitchenMember(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { memberId } = req.body;
+
+    if (!memberId) {
+      res.status(400).json({ error: "memberId is required" });
+      return;
+    }
+
+    const kitchen = await Kitchen.findById(id);
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    if (kitchen.leadId.toString() === memberId) {
+      res.status(400).json({ error: "Cannot remove the kitchen lead" });
+      return;
+    }
+
+    await User.updateOne(
+      { _id: memberId, kitchenId: id },
+      { $unset: { kitchenId: 1 } }
+    );
+
+    await Kitchen.updateOne(
+      { _id: id },
+      {
+        $inc: { memberCount: -1 },
+        $pull: {
+          membersWithScheduleEdit: memberId,
+          membersWithApprovalPower: memberId,
+        },
+      }
+    );
+
+    await audit(req, "remove_kitchen_member", "kitchen", id as string, { memberId });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to remove kitchen member:", error);
+    res.status(500).json({ error: "Failed to remove member" });
+  }
+}
+
+export async function transferKitchenLead(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { newLeadId } = req.body;
+
+    if (!newLeadId) {
+      res.status(400).json({ error: "newLeadId is required" });
+      return;
+    }
+
+    const newLead = await User.findOne({ _id: newLeadId, kitchenId: id });
+    if (!newLead) {
+      res.status(400).json({ error: "New lead must be a member of the kitchen" });
+      return;
+    }
+
+    const kitchen = await Kitchen.findByIdAndUpdate(
+      id,
+      { $set: { leadId: newLeadId } }
+    );
+
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    await audit(req, "transfer_kitchen_lead", "kitchen", id as string, {
+      previousLeadId: kitchen.leadId.toString(),
+      newLeadId,
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to transfer kitchen lead:", error);
+    res.status(500).json({ error: "Failed to transfer lead" });
+  }
+}
+
+export async function deleteKitchen(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+
+    const kitchen = await Kitchen.findById(id);
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    await User.updateMany({ kitchenId: id }, { $unset: { kitchenId: 1 } });
+    await ScheduleEntry.deleteMany({ kitchenId: id });
+    await ShoppingList.deleteMany({ kitchenId: id });
+    await Kitchen.findByIdAndDelete(id);
+
+    await audit(req, "delete_kitchen", "kitchen", id as string, { name: kitchen.name });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete kitchen:", error);
+    res.status(500).json({ error: "Failed to delete kitchen" });
+  }
+}

@@ -33,3 +33,23 @@ export async function requireAdminSession(
 
   next();
 }
+
+/**
+ * Requires the admin to have the super_admin role.
+ * Must be used AFTER requireAdminSession.
+ */
+export function requireSuperAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  if (req.session.adminRole !== "super_admin") {
+    if (req.path.startsWith("/api/")) {
+      res.status(403).json({ error: "Forbidden: super admin access required" });
+    } else {
+      res.status(403).send("Forbidden");
+    }
+    return;
+  }
+  next();
+}
