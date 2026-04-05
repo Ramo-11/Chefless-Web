@@ -2,10 +2,25 @@ import { Request, Response, NextFunction } from "express";
 import admin from "firebase-admin";
 import User from "../models/User";
 
-// Initialize Firebase Admin only once
+// Initialize Firebase Admin only once.
+// Service account credentials are required for FCM push delivery.
+// Auth token verification (verifyIdToken) works with just projectId,
+// but admin.messaging().send() needs authenticated credentials.
 if (!admin.apps.length) {
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  if (!serviceAccountKey) {
+    console.warn(
+      "Firebase Admin initialized without FIREBASE_SERVICE_ACCOUNT_KEY. " +
+        "Auth verification may still work, but FCM push notifications are disabled."
+    );
+  }
   admin.initializeApp({
     projectId: process.env.FIREBASE_PROJECT_ID,
+    ...(serviceAccountKey && {
+      credential: admin.credential.cert(
+        JSON.parse(serviceAccountKey) as admin.ServiceAccount
+      ),
+    }),
   });
 }
 

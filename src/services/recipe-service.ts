@@ -3,7 +3,6 @@ import Recipe, { IRecipe, IIngredient, IStep } from "../models/Recipe";
 import Like from "../models/Like";
 import RecipeShare from "../models/RecipeShare";
 import User from "../models/User";
-import SystemLabel from "../models/SystemLabel";
 import { canViewRecipe } from "./visibility-service";
 import { uploadImage } from "../lib/cloudinary";
 import {
@@ -85,22 +84,6 @@ interface PaginatedRecipes {
 
 // --- Helpers ---
 
-/**
- * Validates that all provided label slugs exist in the SystemLabel collection.
- * Throws a 400 error if any are invalid.
- */
-async function validateLabels(labels: string[]): Promise<void> {
-  if (!labels || labels.length === 0) return;
-  const validLabels = await SystemLabel.find({ slug: { $in: labels } })
-    .select("slug")
-    .lean();
-  const validSlugs = new Set(validLabels.map((l) => l.slug));
-  const invalid = labels.filter((l) => !validSlugs.has(l));
-  if (invalid.length > 0) {
-    throw createError(`Invalid label(s): ${invalid.join(", ")}`, 400);
-  }
-}
-
 function computeTotalTime(prepTime?: number | null, cookTime?: number | null): number | undefined {
   if (prepTime != null && cookTime != null) {
     return prepTime + cookTime;
@@ -140,10 +123,6 @@ export async function createRecipe(
       `Free tier is limited to ${FREE_TIER_RECIPE_LIMIT} recipes. Upgrade to premium for unlimited recipes.`,
       403
     );
-  }
-
-  if (data.labels && data.labels.length > 0) {
-    await validateLabels(data.labels);
   }
 
   const totalTime = computeTotalTime(data.prepTime, data.cookTime);
@@ -242,10 +221,6 @@ export async function updateRecipe(
 
   if (!recipe.authorId.equals(userId)) {
     throw createError("Only the author can update this recipe", 403);
-  }
-
-  if (updates.labels && updates.labels.length > 0) {
-    await validateLabels(updates.labels);
   }
 
   // Build update object, handling null values as unset
@@ -434,6 +409,15 @@ export async function forkRecipe(
     throw createError("You cannot fork your own recipe", 400);
   }
 
+  // Prevent duplicate forks — one remix per recipe per user
+  const existingFork = await Recipe.findOne({
+    authorId: new Types.ObjectId(userId),
+    "forkedFrom.recipeId": originalRecipe._id,
+  }).lean();
+  if (existingFork) {
+    throw createError("You have already remixed this recipe", 400);
+  }
+
   const totalTime = computeTotalTime(originalRecipe.prepTime, originalRecipe.cookTime);
 
   const forkedRecipe = await Recipe.create({
@@ -484,6 +468,68 @@ export async function forkRecipe(
   });
 
   return forkedRecipe;
+}
+
+export async function duplicateRecipe(
+  recipeId: string,
+  userId: string
+): Promise<IRecipe> {
+  const user = await User.findById(userId)
+    .select("isPremium recipesCount")
+    .lean();
+  if (!user) {
+    throw createError("User not found", 404);
+  }
+
+  if (!user.isPremium && user.recipesCount >= FREE_TIER_RECIPE_LIMIT) {
+    throw createError(
+      `Free tier is limited to ${FREE_TIER_RECIPE_LIMIT} recipes. Upgrade to premium for unlimited recipes.`,
+      403
+    );
+  }
+
+  const originalRecipe = await Recipe.findById(recipeId);
+  if (!originalRecipe) {
+    throw createError("Recipe not found", 404);
+  }
+
+  // Can only duplicate your own recipe
+  if (!originalRecipe.authorId.equals(userId)) {
+    throw createError("You can only duplicate your own recipes", 403);
+  }
+
+  const totalTime = computeTotalTime(
+    originalRecipe.prepTime,
+    originalRecipe.cookTime
+  );
+
+  const duplicated = await Recipe.create({
+    authorId: new Types.ObjectId(userId),
+    title: `${originalRecipe.title} (Copy)`,
+    description: originalRecipe.description,
+    story: originalRecipe.story,
+    photos: originalRecipe.photos,
+    showSignature: originalRecipe.showSignature,
+    labels: originalRecipe.labels,
+    dietaryTags: originalRecipe.dietaryTags,
+    cuisineTags: originalRecipe.cuisineTags,
+    difficulty: originalRecipe.difficulty,
+    ingredients: originalRecipe.ingredients,
+    steps: originalRecipe.steps,
+    prepTime: originalRecipe.prepTime,
+    cookTime: originalRecipe.cookTime,
+    totalTime,
+    servings: originalRecipe.servings,
+    calories: originalRecipe.calories,
+    costEstimate: originalRecipe.costEstimate,
+    baseServings: originalRecipe.baseServings,
+    isPrivate: originalRecipe.isPrivate,
+  });
+
+  // Increment user's recipe count
+  await User.updateOne({ _id: userId }, { $inc: { recipesCount: 1 } });
+
+  return duplicated;
 }
 
 export async function likeRecipe(

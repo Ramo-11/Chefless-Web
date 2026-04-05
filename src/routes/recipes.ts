@@ -11,6 +11,7 @@ import {
   deleteRecipe,
   listMyRecipes,
   forkRecipe,
+  duplicateRecipe,
   likeRecipe,
   unlikeRecipe,
   listLikedRecipes,
@@ -316,6 +317,27 @@ router.post(
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const recipe = await forkRecipe(id, user._id.toString());
+
+    res.status(201).json({ recipe });
+  })
+);
+
+// POST /api/recipes/:id/duplicate — Duplicate own recipe
+router.post(
+  "/:id/duplicate",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const recipe = await duplicateRecipe(id, user._id.toString());
 
     res.status(201).json({ recipe });
   })

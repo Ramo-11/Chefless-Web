@@ -40,9 +40,14 @@ app.use(cors({
   methods: ["GET", "POST", "PATCH", "DELETE"],
   allowedHeaders: ["Authorization", "Content-Type"],
 }));
-app.use(express.json({ limit: "50kb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(defaultLimiter);
+
+// JSON body parsers — applied per-route so upload routes can have a higher limit.
+// Must NOT use a global express.json() or its limit would block larger uploads
+// before the route-specific parser runs.
+const jsonDefault = express.json({ limit: "1mb" });
+const jsonUpload = express.json({ limit: "50mb" });
 
 // ── Session middleware (admin panel only, but applied globally) ──────
 app.use(
@@ -74,19 +79,19 @@ app.use("/admin", adminRouter);
 app.use("/api/webhooks", webhooksRouter);
 
 // ── API routes ──────────────────────────────────────────────────────
-app.use("/api/health", healthRouter);
-app.use("/api/auth", authRouter);
+app.use("/api/health", jsonDefault, healthRouter);
+app.use("/api/auth", jsonDefault, authRouter);
 // Upload routes need a higher body limit for base64 image data
-app.use("/api/users", express.json({ limit: "10mb" }), usersRouter);
-app.use("/api/recipes", express.json({ limit: "10mb" }), recipesRouter);
-app.use("/api/kitchens", kitchensRouter);
-app.use("/api/schedule", scheduleRouter);
-app.use("/api/shopping-lists", shoppingListsRouter);
-app.use("/api/search", searchRouter);
-app.use("/api/feed", feedRouter);
-app.use("/api/notifications", notificationsRouter);
-app.use("/api/labels", labelsRouter);
-app.use("/api/reports", reportsRouter);
+app.use("/api/users", jsonUpload, usersRouter);
+app.use("/api/recipes", jsonUpload, recipesRouter);
+app.use("/api/kitchens", jsonDefault, kitchensRouter);
+app.use("/api/schedule", jsonDefault, scheduleRouter);
+app.use("/api/shopping-lists", jsonDefault, shoppingListsRouter);
+app.use("/api/search", jsonDefault, searchRouter);
+app.use("/api/feed", jsonDefault, feedRouter);
+app.use("/api/notifications", jsonDefault, notificationsRouter);
+app.use("/api/labels", jsonDefault, labelsRouter);
+app.use("/api/reports", jsonDefault, reportsRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);
