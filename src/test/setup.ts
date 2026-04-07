@@ -1,3 +1,4 @@
+import path from "path";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import { vi } from "vitest";
@@ -23,7 +24,11 @@ vi.mock("firebase-admin", () => {
 });
 
 beforeAll(async () => {
-  mongoServer = await MongoMemoryServer.create();
+  mongoServer = await MongoMemoryServer.create({
+    binary: {
+      downloadDir: path.join(process.cwd(), ".mongodb-binaries"),
+    },
+  });
   const uri = mongoServer.getUri();
   await mongoose.connect(uri);
 });
@@ -37,5 +42,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await mongoose.disconnect();
-  await mongoServer.stop();
+  if (mongoServer) {
+    await mongoServer.stop();
+  }
 });

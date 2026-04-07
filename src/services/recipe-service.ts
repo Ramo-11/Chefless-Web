@@ -706,7 +706,7 @@ export async function shareRecipe(
   });
 
   // Fire-and-forget notification
-  notifyRecipeShared(senderId, recipientId, recipeId).catch((err: unknown) => {
+  notifyRecipeShared(senderId, recipientId, recipeId, message).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error(`Failed to send recipe_shared notification: ${msg}`);
   });

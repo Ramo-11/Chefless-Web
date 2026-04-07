@@ -117,10 +117,6 @@ router.post(
     const { token } = req.body as z.infer<typeof fcmTokenSchema>;
     const firebaseUid = req.user!.uid;
 
-    console.log(
-      `[FCM-DEBUG] POST /fcm-token — uid="${firebaseUid}", tokenPrefix="${token.slice(0, 12)}...", tokenLength=${token.length}`
-    );
-
     const user = await User.findOneAndUpdate(
       { firebaseUid },
       { fcmToken: token, lastActiveAt: new Date() },
@@ -128,14 +124,10 @@ router.post(
     );
 
     if (!user) {
-      console.warn(`[FCM-DEBUG] POST /fcm-token — user NOT FOUND for uid="${firebaseUid}"`);
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    console.log(
-      `[FCM-DEBUG] POST /fcm-token — saved. userId="${user._id}", storedTokenPrefix="${user.fcmToken?.slice(0, 12)}..."`
-    );
     res.status(200).json({ success: true });
   })
 );

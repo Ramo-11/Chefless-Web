@@ -19,6 +19,7 @@ interface CreateNotificationParams {
   actorPhoto?: string;
   recipeId?: Types.ObjectId;
   recipeTitle?: string;
+  shareMessage?: string;
   kitchenId?: Types.ObjectId;
   kitchenName?: string;
   scheduleEntryId?: Types.ObjectId;
@@ -92,16 +93,11 @@ export async function createNotification(
     actorPhoto: params.actorPhoto,
     recipeId: params.recipeId,
     recipeTitle: params.recipeTitle,
+    shareMessage: params.shareMessage,
     kitchenId: params.kitchenId,
     kitchenName: params.kitchenName,
     scheduleEntryId: params.scheduleEntryId,
   });
-
-  console.log(
-    `[FCM-DEBUG] createNotification: type="${params.type}", ` +
-      `userId="${params.userId}", hasPushTitle=${!!params.pushTitle}, ` +
-      `hasPushBody=${!!params.pushBody}, userFcmToken=${user?.fcmToken ? `"${user.fcmToken.slice(0, 12)}..."` : "NONE"}`
-  );
 
   // Send push notification if user has an FCM token
   if (params.pushTitle && params.pushBody && user?.fcmToken) {
@@ -112,6 +108,9 @@ export async function createNotification(
 
     if (params.recipeId) {
       pushData.recipeId = params.recipeId.toString();
+    }
+    if (params.shareMessage) {
+      pushData.shareMessage = params.shareMessage;
     }
     if (params.actorId) {
       pushData.actorId = params.actorId.toString();
@@ -127,11 +126,6 @@ export async function createNotification(
       pushData.route = route;
     }
 
-    console.log(
-      `[FCM-DEBUG] Dispatching push: title="${params.pushTitle}", route="${route}", ` +
-        `data=${JSON.stringify(pushData)}`
-    );
-
     sendPushNotification(
       user.fcmToken,
       params.pushTitle,
@@ -139,13 +133,8 @@ export async function createNotification(
       pushData
     ).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      console.error(`[FCM-DEBUG] Push notification failed: ${msg}`);
+      console.error(`Push notification failed: ${msg}`);
     });
-  } else {
-    console.log(
-      `[FCM-DEBUG] SKIPPING push: pushTitle=${!!params.pushTitle}, ` +
-        `pushBody=${!!params.pushBody}, hasFcmToken=${!!user?.fcmToken}`
-    );
   }
 
   return notification;
@@ -201,6 +190,23 @@ export async function markAllAsRead(userId: string): Promise<number> {
   );
 
   return result.modifiedCount;
+}
+
+export async function clearNotifications(
+  userId: string,
+  notificationIds?: string[]
+): Promise<number> {
+  const objectId = new Types.ObjectId(userId);
+  const query: Record<string, unknown> = { userId: objectId };
+
+  if (notificationIds && notificationIds.length > 0) {
+    query._id = {
+      $in: notificationIds.map((id) => new Types.ObjectId(id)),
+    };
+  }
+
+  const result = await Notification.deleteMany(query);
+  return result.deletedCount ?? 0;
 }
 
 export async function getUnreadCount(userId: string): Promise<number> {
@@ -337,7 +343,8 @@ export async function notifyRecipeForked(
 export async function notifyRecipeShared(
   senderId: string,
   recipientId: string,
-  recipeId: string
+  recipeId: string,
+  shareMessage?: string
 ): Promise<void> {
   if (senderId === recipientId) return;
 
@@ -347,6 +354,12 @@ export async function notifyRecipeShared(
   ]);
   if (!actor || !recipe) return;
 
+  const trimmedShareMessage = shareMessage?.trim();
+  const shareMessagePreview =
+    trimmedShareMessage && trimmedShareMessage.length > 120
+      ? `${trimmedShareMessage.slice(0, 117)}...`
+      : trimmedShareMessage;
+
   await createNotification({
     userId: new Types.ObjectId(recipientId),
     type: "recipe_shared",
@@ -355,8 +368,11 @@ export async function notifyRecipeShared(
     actorPhoto: actor.profilePicture,
     recipeId: new Types.ObjectId(recipeId),
     recipeTitle: recipe.title,
+    shareMessage: trimmedShareMessage,
     pushTitle: "Recipe Shared",
-    pushBody: `${actor.fullName} shared a recipe with you: "${recipe.title}".`,
+    pushBody: shareMessagePreview
+      ? `${actor.fullName} shared "${recipe.title}" with you: "${shareMessagePreview}"`
+      : `${actor.fullName} shared a recipe with you: "${recipe.title}".`,
   });
 }
 

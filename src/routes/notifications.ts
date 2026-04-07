@@ -13,6 +13,7 @@ import {
   markAsRead,
   markAllAsRead,
   getUnreadCount,
+  clearNotifications,
 } from "../services/notification-service";
 
 const router = Router();
@@ -45,6 +46,16 @@ const markReadSchema = z.object({
     )
     .min(1, "At least one notification ID is required")
     .max(100, "Cannot mark more than 100 notifications at once"),
+});
+
+const clearNotificationsSchema = z.object({
+  ids: z
+    .array(
+      z.string().refine(isValidObjectId, { message: "Invalid notification ID" })
+    )
+    .min(1, "At least one notification ID is required")
+    .max(500, "Cannot clear more than 500 notifications at once")
+    .optional(),
 });
 
 // Build a Zod schema that allows any subset of notification type keys as booleans.
@@ -143,6 +154,27 @@ router.post(
     const modifiedCount = await markAllAsRead(currentUser._id.toString());
 
     res.status(200).json({ success: true, modifiedCount });
+  })
+);
+
+// POST /api/notifications/clear — Delete notifications for the current user
+router.post(
+  "/clear",
+  requireAuth,
+  validate({ body: clearNotificationsSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { ids } = req.body as z.infer<typeof clearNotificationsSchema>;
+    const deletedCount = await clearNotifications(currentUser._id.toString(), ids);
+
+    res.status(200).json({ success: true, deletedCount });
   })
 );
 

@@ -27,6 +27,7 @@ export interface INotification extends Document {
   actorPhoto?: string;
   recipeId?: Types.ObjectId;
   recipeTitle?: string;
+  shareMessage?: string;
   kitchenId?: Types.ObjectId;
   kitchenName?: string;
   scheduleEntryId?: Types.ObjectId;
@@ -57,6 +58,7 @@ const notificationSchema = new Schema<INotification>(
       ref: "Recipe",
     },
     recipeTitle: { type: String, trim: true },
+    shareMessage: { type: String, trim: true, maxlength: 500 },
     kitchenId: {
       type: Schema.Types.ObjectId,
       ref: "Kitchen",
