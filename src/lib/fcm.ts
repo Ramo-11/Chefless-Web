@@ -64,9 +64,20 @@ export async function sendPushNotification(
       },
     };
 
-    console.log(
-      `[FCM-DEBUG] Sending message. Full payload: ${JSON.stringify(message, null, 2)}`
-    );
+    // Verify credential is still valid right before sending
+    try {
+      const tokenResult = await admin.app().options.credential!.getAccessToken();
+      console.log(
+        `[FCM-DEBUG] Pre-send token check: valid, prefix="${tokenResult.access_token.slice(0, 20)}...", ` +
+          `expires_in=${tokenResult.expires_in}s`
+      );
+    } catch (tokenErr) {
+      console.error(
+        `[FCM-DEBUG] Pre-send token check FAILED: ${tokenErr instanceof Error ? tokenErr.message : tokenErr}`
+      );
+    }
+
+    console.log(`[FCM-DEBUG] Sending message via admin.messaging().send()...`);
 
     const messageId = await admin.messaging().send(message);
     console.log(
