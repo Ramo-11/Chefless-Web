@@ -59,7 +59,7 @@ const joinKitchenSchema = z.object({
     .string()
     .min(1)
     .regex(INVITE_CODE_REGEX, {
-      message: "Invalid invite code format. Expected CHEF-XXXXXX",
+      message: "Invalid invite code format. Expected something like CHEF-AB12CD",
     }),
 });
 
