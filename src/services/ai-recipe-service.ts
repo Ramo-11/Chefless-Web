@@ -50,7 +50,7 @@ function utcDayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export async function assertAiQuota(userId: string): Promise<void> {
+export async function getAiUsage(userId: string): Promise<{ used: number; limit: number }> {
   const day = utcDayKey();
   const user = await User.findById(userId)
     .select("aiRecipeHelperUsageDay aiRecipeHelperUsageCount")
@@ -58,11 +58,16 @@ export async function assertAiQuota(userId: string): Promise<void> {
   if (!user) {
     throw createError("User not found", 404);
   }
-  const count =
+  const used =
     user.aiRecipeHelperUsageDay === day ? user.aiRecipeHelperUsageCount ?? 0 : 0;
-  if (count >= AI_DAILY_LIMIT) {
+  return { used, limit: AI_DAILY_LIMIT };
+}
+
+export async function assertAiQuota(userId: string): Promise<void> {
+  const { used, limit } = await getAiUsage(userId);
+  if (used >= limit) {
     throw createError(
-      `Daily AI limit reached (${AI_DAILY_LIMIT} uses). Try again tomorrow.`,
+      `Daily AI limit reached (${limit} uses). Try again tomorrow.`,
       429
     );
   }

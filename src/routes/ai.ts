@@ -7,6 +7,7 @@ import User from "../models/User";
 import {
   assertAiQuota,
   recordAiUsage,
+  getAiUsage,
   aiGenerateFromIngredients,
   aiSuggestSubstitutions,
   aiFormatRoughNotes,
@@ -42,6 +43,21 @@ const formatSchema = z.object({
   notes: z.string().min(1).max(12000),
 });
 
+router.get(
+  "/usage",
+  requireAuth,
+  requirePremium,
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = await resolveMongoUserId(req);
+    if (!userId) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    const usage = await getAiUsage(userId);
+    res.status(200).json(usage);
+  })
+);
+
 router.post(
   "/generate-recipe",
   requireAuth,
@@ -57,7 +73,8 @@ router.post(
     const { prompt } = req.body as z.infer<typeof generateSchema>;
     const recipe = await aiGenerateFromIngredients(prompt);
     await recordAiUsage(userId);
-    res.status(200).json({ recipe });
+    const usage = await getAiUsage(userId);
+    res.status(200).json({ recipe, usage });
   })
 );
 
@@ -76,7 +93,8 @@ router.post(
     const body = req.body as z.infer<typeof substituteSchema>;
     const result = await aiSuggestSubstitutions(body.ingredients, body.dietaryNeed);
     await recordAiUsage(userId);
-    res.status(200).json(result);
+    const usage = await getAiUsage(userId);
+    res.status(200).json({ ...result, usage });
   })
 );
 
@@ -95,7 +113,8 @@ router.post(
     const { notes } = req.body as z.infer<typeof formatSchema>;
     const recipe = await aiFormatRoughNotes(notes);
     await recordAiUsage(userId);
-    res.status(200).json({ recipe });
+    const usage = await getAiUsage(userId);
+    res.status(200).json({ recipe, usage });
   })
 );
 
