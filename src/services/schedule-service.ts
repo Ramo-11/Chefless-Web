@@ -78,7 +78,7 @@ function hasApprovalPermission(
 
 export async function addEntry(
   userId: string,
-  kitchenId: string,
+  kitchenId: string | null,
   data: AddEntryData
 ): Promise<IScheduleEntry> {
   const user = await User.findById(userId)
@@ -88,10 +88,6 @@ export async function addEntry(
     throw createError("User not found", 404);
   }
 
-  if (!user.kitchenId || !user.kitchenId.equals(kitchenId)) {
-    throw createError("You are not a member of this kitchen", 403);
-  }
-
   const entryDate = stripTime(data.date);
 
   if (!hasActivePremium(user) && isBeyondFreeTierScheduleLimit(entryDate)) {
@@ -99,6 +95,32 @@ export async function addEntry(
       "Free tier users can plan through the end of next week only. Upgrade to premium for monthly scheduling.",
       403
     );
+  }
+
+  // Personal entry (no kitchen)
+  if (!kitchenId) {
+    const entryFields: Record<string, unknown> = {
+      userId: new Types.ObjectId(userId),
+      date: entryDate,
+      mealSlot: data.mealSlot,
+      status: "confirmed",
+      confirmedBy: new Types.ObjectId(userId),
+    };
+
+    if (data.freeformText) {
+      entryFields.freeformText = data.freeformText;
+    }
+
+    if (data.recipeId) {
+      await populateRecipeFields(entryFields, data.recipeId);
+    }
+
+    return ScheduleEntry.create(entryFields);
+  }
+
+  // Kitchen entry
+  if (!user.kitchenId || !user.kitchenId.equals(kitchenId)) {
+    throw createError("You are not a member of this kitchen", 403);
   }
 
   const kitchen = await Kitchen.findById(kitchenId);
@@ -111,6 +133,7 @@ export async function addEntry(
 
   const entryFields: Record<string, unknown> = {
     kitchenId: new Types.ObjectId(kitchenId),
+    userId: new Types.ObjectId(userId),
     date: entryDate,
     mealSlot: data.mealSlot,
     status,
@@ -125,24 +148,8 @@ export async function addEntry(
     entryFields.freeformText = data.freeformText;
   }
 
-  // Denormalize recipe data if recipeId provided
   if (data.recipeId) {
-    const recipe = await Recipe.findById(data.recipeId)
-      .select("title photos authorId")
-      .lean();
-    if (!recipe) {
-      throw createError("Recipe not found", 404);
-    }
-
-    const author = await User.findById(recipe.authorId)
-      .select("fullName")
-      .lean();
-
-    entryFields.recipeId = new Types.ObjectId(data.recipeId);
-    entryFields.recipeTitle = recipe.title;
-    entryFields.recipePhoto = recipe.photos.length > 0 ? recipe.photos[0] : undefined;
-    entryFields.recipeAuthorId = recipe.authorId;
-    entryFields.recipeAuthorName = author?.fullName;
+    await populateRecipeFields(entryFields, data.recipeId);
   }
 
   const entry = await ScheduleEntry.create(entryFields);
@@ -162,18 +169,51 @@ export async function addEntry(
   return entry;
 }
 
+/** Populates recipe-related fields on the entry fields object. */
+async function populateRecipeFields(
+  entryFields: Record<string, unknown>,
+  recipeId: string
+): Promise<void> {
+  const recipe = await Recipe.findById(recipeId)
+    .select("title photos authorId")
+    .lean();
+  if (!recipe) {
+    throw createError("Recipe not found", 404);
+  }
+
+  const author = await User.findById(recipe.authorId)
+    .select("fullName")
+    .lean();
+
+  entryFields.recipeId = new Types.ObjectId(recipeId);
+  entryFields.recipeTitle = recipe.title;
+  entryFields.recipePhoto = recipe.photos.length > 0 ? recipe.photos[0] : undefined;
+  entryFields.recipeAuthorId = recipe.authorId;
+  entryFields.recipeAuthorName = author?.fullName;
+}
+
 export async function getEntries(
-  kitchenId: string,
+  query: { kitchenId?: string; userId?: string },
   startDate: Date,
   endDate: Date
 ): Promise<IScheduleEntry[]> {
   const start = stripTime(startDate);
   const end = stripTime(endDate);
 
-  const entries = await ScheduleEntry.find({
-    kitchenId: new Types.ObjectId(kitchenId),
+  const filter: Record<string, unknown> = {
     date: { $gte: start, $lte: end },
-  })
+  };
+
+  if (query.kitchenId) {
+    filter.kitchenId = new Types.ObjectId(query.kitchenId);
+  } else if (query.userId) {
+    filter.userId = new Types.ObjectId(query.userId);
+    filter.kitchenId = { $exists: false };
+  } else {
+    throw createError("Either kitchenId or userId must be provided", 400);
+  }
+
+  const entries = await ScheduleEntry.find(filter)
     .sort({ date: 1, mealSlot: 1 })
     .lean<IScheduleEntry[]>();
 
@@ -197,26 +237,34 @@ export async function updateEntry(
     throw createError("User not found", 404);
   }
 
-  if (!user.kitchenId || !user.kitchenId.equals(entry.kitchenId)) {
-    throw createError("You are not a member of this kitchen", 403);
-  }
+  // Personal entry (no kitchenId on entry) — verify ownership
+  if (!entry.kitchenId) {
+    if (!entry.userId.equals(userId)) {
+      throw createError("You do not own this schedule entry", 403);
+    }
+  } else {
+    // Kitchen entry — existing permission logic
+    if (!user.kitchenId || !user.kitchenId.equals(entry.kitchenId)) {
+      throw createError("You are not a member of this kitchen", 403);
+    }
 
-  const kitchen = await Kitchen.findById(entry.kitchenId);
-  if (!kitchen) {
-    throw createError("Kitchen not found", 404);
-  }
+    const kitchen = await Kitchen.findById(entry.kitchenId);
+    if (!kitchen) {
+      throw createError("Kitchen not found", 404);
+    }
 
-  const canEdit = hasScheduleEditPermission(userId, kitchen);
+    const canEdit = hasScheduleEditPermission(userId, kitchen);
 
-  // Confirmed entries: only lead/editors can update
-  if (entry.status === "confirmed" && !canEdit) {
-    throw createError("Only the kitchen lead or editors can update confirmed entries", 403);
-  }
+    // Confirmed entries: only lead/editors can update
+    if (entry.status === "confirmed" && !canEdit) {
+      throw createError("Only the kitchen lead or editors can update confirmed entries", 403);
+    }
 
-  // Suggested entries: only the original suggester can update
-  if (entry.status === "suggested") {
-    if (!entry.suggestedBy?.equals(userId) && !canEdit) {
-      throw createError("You can only update your own suggestions", 403);
+    // Suggested entries: only the original suggester can update
+    if (entry.status === "suggested") {
+      if (!entry.suggestedBy?.equals(userId) && !canEdit) {
+        throw createError("You can only update your own suggestions", 403);
+      }
     }
   }
 
@@ -242,22 +290,7 @@ export async function updateEntry(
   }
 
   if (updates.recipeId !== undefined) {
-    const recipe = await Recipe.findById(updates.recipeId)
-      .select("title photos authorId")
-      .lean();
-    if (!recipe) {
-      throw createError("Recipe not found", 404);
-    }
-
-    const author = await User.findById(recipe.authorId)
-      .select("fullName")
-      .lean();
-
-    updateFields.recipeId = new Types.ObjectId(updates.recipeId);
-    updateFields.recipeTitle = recipe.title;
-    updateFields.recipePhoto = recipe.photos.length > 0 ? recipe.photos[0] : undefined;
-    updateFields.recipeAuthorId = recipe.authorId;
-    updateFields.recipeAuthorName = author?.fullName;
+    await populateRecipeFields(updateFields, updates.recipeId);
   }
 
   const updated = await ScheduleEntry.findByIdAndUpdate(
@@ -287,6 +320,16 @@ export async function deleteEntry(
     throw createError("User not found", 404);
   }
 
+  // Personal entry — verify ownership
+  if (!entry.kitchenId) {
+    if (!entry.userId.equals(userId)) {
+      throw createError("You do not own this schedule entry", 403);
+    }
+    await ScheduleEntry.findByIdAndDelete(entryId);
+    return;
+  }
+
+  // Kitchen entry — existing permission logic
   if (!user.kitchenId || !user.kitchenId.equals(entry.kitchenId)) {
     throw createError("You are not a member of this kitchen", 403);
   }
@@ -428,7 +471,7 @@ export async function denySuggestion(
   }
 
   // Capture data needed for notification before deleting (avoids race condition)
-  const notificationData = entry.suggestedBy
+  const notificationData = entry.suggestedBy && entry.kitchenId
     ? {
         suggestedBy: entry.suggestedBy,
         kitchenId: entry.kitchenId,
@@ -446,4 +489,63 @@ export async function denySuggestion(
       console.error(`Failed to send suggestion_denied notification: ${msg}`);
     });
   }
+}
+
+export async function importToKitchen(
+  userId: string,
+  kitchenId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<number> {
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user) {
+    throw createError("User not found", 404);
+  }
+
+  if (!user.kitchenId || !user.kitchenId.equals(kitchenId)) {
+    throw createError("You are not a member of this kitchen", 403);
+  }
+
+  const kitchen = await Kitchen.findById(kitchenId);
+  if (!kitchen) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  const start = stripTime(startDate);
+  const end = stripTime(endDate);
+
+  // Fetch the user's personal entries within the date range
+  const personalEntries = await ScheduleEntry.find({
+    userId: new Types.ObjectId(userId),
+    kitchenId: { $exists: false },
+    date: { $gte: start, $lte: end },
+  }).lean<IScheduleEntry[]>();
+
+  if (personalEntries.length === 0) {
+    return 0;
+  }
+
+  const canEdit = hasScheduleEditPermission(userId, kitchen);
+  const status = canEdit ? "confirmed" : "suggested";
+
+  const kitchenEntries = personalEntries.map((entry) => ({
+    kitchenId: new Types.ObjectId(kitchenId),
+    userId: new Types.ObjectId(userId),
+    date: entry.date,
+    mealSlot: entry.mealSlot,
+    recipeId: entry.recipeId,
+    recipeTitle: entry.recipeTitle,
+    recipePhoto: entry.recipePhoto,
+    recipeAuthorId: entry.recipeAuthorId,
+    recipeAuthorName: entry.recipeAuthorName,
+    freeformText: entry.freeformText,
+    status,
+    suggestedBy: new Types.ObjectId(userId),
+    ...(status === "confirmed"
+      ? { confirmedBy: new Types.ObjectId(userId) }
+      : {}),
+  }));
+
+  const result = await ScheduleEntry.insertMany(kitchenEntries);
+  return result.length;
 }

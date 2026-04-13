@@ -5,6 +5,7 @@ import { authLimiter } from "../middleware/rateLimit";
 import { csrfProtection } from "../middleware/csrf";
 import { loginPage, loginPost, logout } from "./auth";
 import { dashboardPage } from "./controllers/dashboard";
+import { analyticsPage } from "./controllers/analytics";
 import { usersPage, userDetail, banUser, unbanUser, updateUser } from "./controllers/users";
 import {
   recipesPage,
@@ -27,6 +28,13 @@ import {
   tagRecipe,
   untagRecipe,
 } from "./controllers/seasonal";
+import {
+  promoCodesPage,
+  createPromoCode,
+  updatePromoCode,
+  deletePromoCode,
+  promoCodeDetail,
+} from "./controllers/promo-codes";
 import {
   kitchensPage,
   kitchenDetail,
@@ -72,6 +80,10 @@ router.post("/api/seasonal/tags/:id/toggle", csrfProtection, toggleTag);
 router.delete("/api/seasonal/tags/:id", csrfProtection, deleteTag);
 router.post("/api/seasonal/tag-recipe", csrfProtection, tagRecipe);
 router.post("/api/seasonal/untag-recipe", csrfProtection, untagRecipe);
+router.get("/api/promo-codes/:id", promoCodeDetail);
+router.post("/api/promo-codes", csrfProtection, createPromoCode);
+router.put("/api/promo-codes/:id", csrfProtection, updatePromoCode);
+router.delete("/api/promo-codes/:id", csrfProtection, deletePromoCode);
 router.get("/api/kitchens/:id", kitchenDetail);
 router.put("/api/kitchens/:id", csrfProtection, updateKitchen);
 router.post("/api/kitchens/:id/remove-member", csrfProtection, removeKitchenMember);
@@ -87,11 +99,13 @@ router.post("/api/admins/:id/reset-password", requireSuperAdmin, csrfProtection,
 // ── Page routes (with layout) ──────────────────────────────────────
 router.use(expressLayouts);
 router.get("/", dashboardPage);
+router.get("/analytics", analyticsPage);
 router.get("/users", usersPage);
 router.get("/recipes", recipesPage);
 router.get("/reports", reportsPage);
 router.get("/labels", labelsPage);
 router.get("/seasonal", seasonalPage);
+router.get("/promo-codes", promoCodesPage);
 router.get("/kitchens", kitchensPage);
 router.get("/admins", requireSuperAdmin, adminsPage);
 

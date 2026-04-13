@@ -2,7 +2,8 @@ import mongoose, { Schema, Document, Types } from "mongoose";
 
 export interface IScheduleEntry extends Document {
   _id: Types.ObjectId;
-  kitchenId: Types.ObjectId;
+  kitchenId?: Types.ObjectId;
+  userId: Types.ObjectId;
   date: Date;
   mealSlot: string;
   recipeId?: Types.ObjectId;
@@ -23,6 +24,10 @@ const scheduleEntrySchema = new Schema<IScheduleEntry>(
     kitchenId: {
       type: Schema.Types.ObjectId,
       ref: "Kitchen",
+    },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
       required: true,
     },
     date: {
@@ -76,6 +81,9 @@ scheduleEntrySchema.index({ kitchenId: 1, date: 1 });
 
 // For querying pending suggestions by kitchen
 scheduleEntrySchema.index({ kitchenId: 1, status: 1 });
+
+// For querying personal schedule entries by user and date range
+scheduleEntrySchema.index({ userId: 1, date: 1 });
 
 // For querying suggestions by user
 scheduleEntrySchema.index({ suggestedBy: 1 });

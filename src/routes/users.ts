@@ -270,6 +270,29 @@ router.post(
   })
 );
 
+// DELETE /api/users/me/signature — remove stored recipe watermark image
+router.delete(
+  "/me/signature",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const user = await User.findByIdAndUpdate(
+      currentUser._id,
+      { $unset: { signature: 1 } },
+      { new: true }
+    );
+
+    res.status(200).json({ user });
+  })
+);
+
 // POST /api/users/requests/:id/accept
 router.post(
   "/requests/:id/accept",

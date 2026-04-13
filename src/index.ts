@@ -23,6 +23,7 @@ import webhooksRouter from "./routes/webhooks";
 import labelsRouter from "./routes/labels";
 import reportsRouter from "./routes/reports";
 import aiRouter from "./routes/ai";
+import promoCodesRouter from "./routes/promo-codes";
 import adminRouter from "./admin/routes";
 import pagesRouter from "./routes/pages";
 
@@ -112,6 +113,7 @@ app.use("/api/notifications", jsonDefault, notificationsRouter);
 app.use("/api/labels", jsonDefault, labelsRouter);
 app.use("/api/reports", jsonDefault, strictLimiter, reportsRouter);
 app.use("/api/ai", jsonDefault, strictLimiter, aiRouter);
+app.use("/api/promo-codes", jsonDefault, promoCodesRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);

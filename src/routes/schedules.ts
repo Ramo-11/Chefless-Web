@@ -12,6 +12,7 @@ import {
   getSuggestions,
   approveSuggestion,
   denySuggestion,
+  importToKitchen,
 } from "../services/schedule-service";
 
 const router = Router();
@@ -212,21 +213,15 @@ router.get(
       return;
     }
 
-    if (!currentUser.kitchenId) {
-      res
-        .status(400)
-        .json({ error: "You must join or create a kitchen first" });
-      return;
-    }
-
     const { start, end } = req.query as unknown as z.infer<
       typeof getEntriesSchema
     >;
-    const entries = await getEntries(
-      currentUser.kitchenId.toString(),
-      start,
-      end
-    );
+
+    const query = currentUser.kitchenId
+      ? { kitchenId: currentUser.kitchenId.toString() }
+      : { userId: currentUser._id.toString() };
+
+    const entries = await getEntries(query, start, end);
 
     res.status(200).json({ entries });
   })
@@ -248,17 +243,14 @@ router.post(
       return;
     }
 
-    if (!currentUser.kitchenId) {
-      res
-        .status(400)
-        .json({ error: "You must join or create a kitchen first" });
-      return;
-    }
-
     const data = req.body as z.infer<typeof addEntrySchema>;
+    const kitchenId = currentUser.kitchenId
+      ? currentUser.kitchenId.toString()
+      : null;
+
     const entry = await addEntry(
       currentUser._id.toString(),
-      currentUser.kitchenId.toString(),
+      kitchenId,
       data
     );
 
@@ -279,13 +271,6 @@ router.patch(
 
     if (!currentUser) {
       res.status(404).json({ error: "User not found" });
-      return;
-    }
-
-    if (!currentUser.kitchenId) {
-      res
-        .status(400)
-        .json({ error: "You must join or create a kitchen first" });
       return;
     }
 
@@ -313,17 +298,63 @@ router.delete(
       return;
     }
 
-    if (!currentUser.kitchenId) {
-      res
-        .status(400)
-        .json({ error: "You must join or create a kitchen first" });
-      return;
-    }
-
     const { id } = req.params as z.infer<typeof objectIdParam>;
     await deleteEntry(currentUser._id.toString(), id);
 
     res.status(200).json({ success: true });
+  })
+);
+
+// POST /api/schedule/import-to-kitchen — Import personal entries into kitchen
+const importToKitchenSchema = z
+  .object({
+    start: dateString,
+    end: dateString,
+  })
+  .refine((data) => data.end >= data.start, {
+    message: "end must be on or after start",
+    path: ["end"],
+  })
+  .refine(
+    (data) => {
+      const diffMs = data.end.getTime() - data.start.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      return diffDays <= MAX_SCHEDULE_RANGE_DAYS;
+    },
+    { message: `Date range cannot exceed ${MAX_SCHEDULE_RANGE_DAYS} days`, path: ["end"] }
+  );
+
+router.post(
+  "/import-to-kitchen",
+  requireAuth,
+  validate({ body: importToKitchenSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id kitchenId")
+      .lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    if (!currentUser.kitchenId) {
+      res
+        .status(400)
+        .json({ error: "You must be in a kitchen to import entries" });
+      return;
+    }
+
+    const { start, end } = req.body as z.infer<typeof importToKitchenSchema>;
+    const count = await importToKitchen(
+      currentUser._id.toString(),
+      currentUser.kitchenId.toString(),
+      start,
+      end
+    );
+
+    res.status(200).json({ imported: count });
   })
 );
 
