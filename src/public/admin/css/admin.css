@@ -638,6 +638,11 @@ img { max-width: 100%; height: auto; }
 .btn-warning-outline { background: transparent; color: var(--warning); border: 1px solid var(--warning); }
 .btn-warning-outline:hover { background: var(--warning-light); }
 
+.btn-premium { background: #d97706; color: #fff; border: none; }
+.btn-premium:hover { background: #b45309; }
+.btn-premium-outline { background: transparent; color: #d97706; border: 1px solid #d97706; }
+.btn-premium-outline:hover { background: #fef3c7; }
+
 .action-buttons { display: flex; gap: 0.35rem; }
 
 /* ── Forms ─────────────────────────────────────────────────── */
@@ -654,6 +659,8 @@ img { max-width: 100%; height: auto; }
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
+
+.form-help { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
 
 .form-group input[type="text"],
 .form-group input[type="email"],

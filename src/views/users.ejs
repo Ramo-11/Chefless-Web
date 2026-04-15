@@ -85,6 +85,15 @@
               <button class="btn btn-sm btn-secondary" onclick="editUser('<%= user._id %>')" aria-label="Edit user">
                 <i class="fas fa-pencil-alt"></i>
               </button>
+              <% if (!user.isPremium) { %>
+                <button class="btn btn-sm btn-premium-outline" onclick="showGrantPremiumModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Grant premium">
+                  <i class="fas fa-crown"></i>
+                </button>
+              <% } else { %>
+                <button class="btn btn-sm btn-warning-outline" onclick="revokePremium('<%= user._id %>', '<%= user.fullName %>')" aria-label="Revoke premium">
+                  <i class="fas fa-crown" style="text-decoration: line-through;"></i>
+                </button>
+              <% } %>
               <% if (!user.isBanned) { %>
                 <button class="btn btn-sm btn-danger-outline" onclick="showBanModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Ban user">
                   <i class="fas fa-ban"></i>
@@ -212,9 +221,32 @@
   </div>
 </div>
 
+<!-- Grant Premium Modal -->
+<div class="modal" id="grant-premium-modal">
+  <div class="modal-content modal-sm">
+    <div class="modal-header">
+      <h2>Grant Premium</h2>
+      <button class="modal-close" onclick="closeModal('grant-premium-modal')" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Grant premium access to <strong id="grant-premium-user-name"></strong>.</p>
+      <div class="form-group">
+        <label for="premium-duration">Duration (days)</label>
+        <input type="number" id="premium-duration" min="0" placeholder="Leave empty for indefinite">
+        <p class="form-help">Leave empty or 0 for indefinite premium access.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('grant-premium-modal')">Cancel</button>
+      <button class="btn btn-premium" onclick="confirmGrantPremium()"><i class="fas fa-crown"></i> Grant Premium</button>
+    </div>
+  </div>
+</div>
+
 <script>
   let banUserId = null;
   let editUserId = null;
+  let grantPremiumUserId = null;
 
   function viewUser(id) {
     openModal('user-detail-modal');
@@ -306,6 +338,36 @@
         closeModal('edit-user-modal');
         showToast('Failed to load user details', 'error');
       });
+  }
+
+  function showGrantPremiumModal(id, name) {
+    grantPremiumUserId = id;
+    document.getElementById('grant-premium-user-name').textContent = name;
+    document.getElementById('premium-duration').value = '';
+    openModal('grant-premium-modal');
+  }
+
+  function confirmGrantPremium() {
+    if (!grantPremiumUserId) return;
+    const durationDays = document.getElementById('premium-duration').value;
+    adminFetch('/admin/api/users/' + grantPremiumUserId + '/grant-premium', {
+      method: 'POST',
+      body: JSON.stringify({ durationDays: durationDays ? Number(durationDays) : 0 })
+    })
+    .then(() => {
+      closeModal('grant-premium-modal');
+      toastAndReload('Premium granted');
+    })
+    .catch(() => showToast('Failed to grant premium', 'error'));
+  }
+
+  function revokePremium(id, name) {
+    if (!confirm('Revoke premium from ' + name + '?')) return;
+    adminFetch('/admin/api/users/' + id + '/revoke-premium', { method: 'POST' })
+    .then(() => {
+      toastAndReload('Premium revoked');
+    })
+    .catch(() => showToast('Failed to revoke premium', 'error'));
   }
 
   function saveUser() {

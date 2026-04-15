@@ -136,6 +136,69 @@ export async function unbanUser(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function grantPremium(req: Request, res: Response): Promise<void> {
+  try {
+    const { durationDays } = req.body;
+    const update: Record<string, unknown> = {
+      isPremium: true,
+      premiumPlan: "admin",
+    };
+    if (durationDays && Number(durationDays) > 0) {
+      const expires = new Date();
+      expires.setDate(expires.getDate() + Number(durationDays));
+      update.premiumExpiresAt = expires;
+    } else {
+      update.$unset = { premiumExpiresAt: 1 };
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      durationDays && Number(durationDays) > 0
+        ? { $set: { isPremium: true, premiumPlan: "admin", premiumExpiresAt: update.premiumExpiresAt } }
+        : { $set: { isPremium: true, premiumPlan: "admin" }, $unset: { premiumExpiresAt: 1 } },
+      { new: true }
+    );
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    await audit(req, "grant_premium", "user", req.params.id as string, {
+      plan: "admin",
+      durationDays: durationDays ? Number(durationDays) : "indefinite",
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to grant premium:", error);
+    res.status(500).json({ error: "Failed to grant premium" });
+  }
+}
+
+export async function revokePremium(req: Request, res: Response): Promise<void> {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        isPremium: false,
+        $unset: { premiumPlan: 1, premiumExpiresAt: 1 },
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    await audit(req, "revoke_premium", "user", req.params.id as string);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to revoke premium:", error);
+    res.status(500).json({ error: "Failed to revoke premium" });
+  }
+}
+
 export async function updateUser(req: Request, res: Response): Promise<void> {
   try {
     const allowedFields = [

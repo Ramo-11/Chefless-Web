@@ -58,7 +58,7 @@ export interface IUser extends Document {
   originalRecipesCount: number;
   kitchenId?: Types.ObjectId;
   isPremium: boolean;
-  premiumPlan?: "monthly" | "annual" | "promo";
+  premiumPlan?: "monthly" | "annual" | "promo" | "admin";
   premiumExpiresAt?: Date;
   chefHatShipped?: boolean;
   shippingAddress?: ShippingAddress;
@@ -150,7 +150,7 @@ const userSchema = new Schema<IUser>(
     },
     premiumPlan: {
       type: String,
-      enum: ["monthly", "annual", "promo"],
+      enum: ["monthly", "annual", "promo", "admin"],
     },
     premiumExpiresAt: { type: Date },
     // NOTE: chefHatShipped and shippingAddress are reserved for a future
