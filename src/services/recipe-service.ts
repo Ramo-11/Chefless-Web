@@ -35,6 +35,7 @@ interface CreateRecipeData {
   labels?: string[];
   dietaryTags?: string[];
   cuisineTags?: string[];
+  tags?: string[];
   difficulty?: "easy" | "medium" | "hard";
   ingredients?: IIngredient[];
   steps?: IStep[];
@@ -56,6 +57,7 @@ interface UpdateRecipeData {
   labels?: string[];
   dietaryTags?: string[];
   cuisineTags?: string[];
+  tags?: string[];
   difficulty?: "easy" | "medium" | "hard" | null;
   ingredients?: IIngredient[];
   steps?: IStep[];
@@ -141,6 +143,7 @@ export async function createRecipe(
     labels: data.labels ?? [],
     dietaryTags: data.dietaryTags ?? [],
     cuisineTags: data.cuisineTags ?? [],
+    tags: data.tags ?? [],
     difficulty: data.difficulty,
     ingredients: data.ingredients ?? [],
     steps: data.steps ?? [],
@@ -722,6 +725,91 @@ export async function shareRecipe(
 }
 
 import type { IRecipeShare } from "../models/RecipeShare";
+
+export interface SharedRecipeItem {
+  shareId: string;
+  recipeId: string;
+  recipeTitle: string;
+  recipePhoto: string | null;
+  recipeAuthorId: string;
+  recipeAuthorName: string | null;
+  senderId: string;
+  senderName: string | null;
+  senderPhoto: string | null;
+  message?: string;
+  sharedAt: Date;
+}
+
+export async function listSharedWithMe(
+  userId: string,
+  cursor?: string,
+  limit = 20
+): Promise<{ items: SharedRecipeItem[]; nextCursor: string | null }> {
+  const query: Record<string, unknown> = {
+    recipientId: new Types.ObjectId(userId),
+  };
+  if (cursor) {
+    query._id = { $lt: new Types.ObjectId(cursor) };
+  }
+
+  const shares = await RecipeShare.find(query)
+    .sort({ _id: -1 })
+    .limit(limit + 1)
+    .lean();
+
+  const hasMore = shares.length > limit;
+  const page = hasMore ? shares.slice(0, limit) : shares;
+  const nextCursor = hasMore ? String(page[page.length - 1]._id) : null;
+
+  // Gather unique IDs
+  const recipeIds = [...new Set(page.map((s) => s.recipeId.toString()))];
+  const senderIds = [...new Set(page.map((s) => s.senderId.toString()))];
+
+  // Batch fetch recipes and senders
+  const [recipes, senders] = await Promise.all([
+    Recipe.find({ _id: { $in: recipeIds } })
+      .select("title photos authorId")
+      .lean(),
+    User.find({ _id: { $in: senderIds } })
+      .select("fullName profilePicture")
+      .lean(),
+  ]);
+
+  const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
+  const senderMap = new Map(senders.map((u) => [u._id.toString(), u]));
+
+  // Fetch author names for recipes
+  const authorIds = [
+    ...new Set(recipes.map((r) => r.authorId.toString())),
+  ];
+  const authors = await User.find({ _id: { $in: authorIds } })
+    .select("fullName")
+    .lean();
+  const authorMap = new Map(authors.map((a) => [a._id.toString(), a]));
+
+  const items: SharedRecipeItem[] = [];
+  for (const share of page) {
+    const recipe = recipeMap.get(share.recipeId.toString());
+    if (!recipe) continue; // recipe was deleted
+    const sender = senderMap.get(share.senderId.toString());
+    const author = authorMap.get(recipe.authorId.toString());
+    items.push({
+      shareId: share._id.toString(),
+      recipeId: recipe._id.toString(),
+      recipeTitle: recipe.title,
+      recipePhoto: recipe.photos?.[0] ?? null,
+      recipeAuthorId: recipe.authorId.toString(),
+      recipeAuthorName: author?.fullName ?? null,
+      senderId: share.senderId.toString(),
+      senderName: sender?.fullName ?? null,
+      senderPhoto: sender?.profilePicture ?? null,
+      message: share.message,
+      sharedAt: share.createdAt,
+    });
+  }
+
+  return { items, nextCursor };
+}
 
 export async function uploadRecipePhoto(
   fileData: string,

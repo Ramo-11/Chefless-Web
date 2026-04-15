@@ -30,6 +30,7 @@ export interface IRecipe extends Document {
   labels: string[];
   dietaryTags: string[];
   cuisineTags: string[];
+  tags: string[];
   difficulty?: "easy" | "medium" | "hard";
   ingredients: IIngredient[];
   steps: IStep[];
@@ -135,6 +136,11 @@ const recipeSchema = new Schema<IRecipe>(
       index: true,
     },
     cuisineTags: {
+      type: [String],
+      default: [],
+      index: true,
+    },
+    tags: {
       type: [String],
       default: [],
       index: true,

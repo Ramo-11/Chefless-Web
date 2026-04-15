@@ -17,6 +17,7 @@ import {
   listLikedRecipes,
   listForkedRecipes,
   shareRecipe,
+  listSharedWithMe,
   uploadRecipePhoto,
 } from "../services/recipe-service";
 import { importRecipeFromUrl } from "../services/recipe-import-service";
@@ -70,6 +71,7 @@ const createRecipeSchema = z.object({
   labels: z.array(z.string().max(50)).max(20).optional(),
   dietaryTags: z.array(z.string().max(50)).max(20).optional(),
   cuisineTags: z.array(z.string().max(50)).max(20).optional(),
+  tags: z.array(z.string().max(50)).max(30).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
   ingredients: z.array(ingredientSchema).optional(),
   steps: z.array(stepSchema).optional(),
@@ -91,6 +93,7 @@ const updateRecipeSchema = z.object({
   labels: z.array(z.string().max(50)).max(20).optional(),
   dietaryTags: z.array(z.string().max(50)).max(20).optional(),
   cuisineTags: z.array(z.string().max(50)).max(20).optional(),
+  tags: z.array(z.string().max(50)).max(30).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).nullable().optional(),
   ingredients: z.array(ingredientSchema).optional(),
   steps: z.array(stepSchema).optional(),
@@ -237,6 +240,30 @@ router.post(
     const { image } = req.body as z.infer<typeof uploadPhotoSchema>;
     const result = await uploadRecipePhoto(image, `recipes/${user._id}`);
 
+    res.status(200).json(result);
+  })
+);
+
+// GET /api/recipes/shared-with-me — List recipes shared with the current user
+router.get(
+  "/shared-with-me",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const cursor = req.query.cursor as string | undefined;
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit as string, 10) || 20, 1),
+      50
+    );
+
+    const result = await listSharedWithMe(user._id.toString(), cursor, limit);
     res.status(200).json(result);
   })
 );
