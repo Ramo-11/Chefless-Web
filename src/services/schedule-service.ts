@@ -54,6 +54,8 @@ interface AddEntryData {
   mealSlot: string;
   recipeId?: string;
   freeformText?: string;
+  scheduledTime?: string;
+  prepTime?: number;
 }
 
 function hasScheduleEditPermission(
@@ -111,6 +113,14 @@ export async function addEntry(
       entryFields.freeformText = data.freeformText;
     }
 
+    if (data.scheduledTime) {
+      entryFields.scheduledTime = data.scheduledTime;
+    }
+
+    if (data.prepTime != null) {
+      entryFields.prepTime = data.prepTime;
+    }
+
     if (data.recipeId) {
       await populateRecipeFields(entryFields, data.recipeId);
     }
@@ -148,6 +158,14 @@ export async function addEntry(
     entryFields.freeformText = data.freeformText;
   }
 
+  if (data.scheduledTime) {
+    entryFields.scheduledTime = data.scheduledTime;
+  }
+
+  if (data.prepTime != null) {
+    entryFields.prepTime = data.prepTime;
+  }
+
   if (data.recipeId) {
     await populateRecipeFields(entryFields, data.recipeId);
   }
@@ -175,7 +193,7 @@ async function populateRecipeFields(
   recipeId: string
 ): Promise<void> {
   const recipe = await Recipe.findById(recipeId)
-    .select("title photos authorId")
+    .select("title photos authorId prepTime")
     .lean();
   if (!recipe) {
     throw createError("Recipe not found", 404);
@@ -190,6 +208,9 @@ async function populateRecipeFields(
   entryFields.recipePhoto = recipe.photos.length > 0 ? recipe.photos[0] : undefined;
   entryFields.recipeAuthorId = recipe.authorId;
   entryFields.recipeAuthorName = author?.fullName;
+  if (recipe.prepTime != null) {
+    entryFields.prepTime = recipe.prepTime;
+  }
 }
 
 export async function getEntries(

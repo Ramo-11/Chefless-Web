@@ -80,6 +80,11 @@ const addEntrySchema = z
       .refine(isValidObjectId, { message: "Invalid recipe ID format" })
       .optional(),
     freeformText: z.string().max(500).trim().optional(),
+    scheduledTime: z
+      .string()
+      .regex(/^\d{2}:\d{2}$/, "Time must be in HH:mm format")
+      .optional(),
+    prepTime: z.number().int().min(0).max(1440).optional(),
   })
   .refine((data) => data.recipeId || data.freeformText, {
     message: "Either recipeId or freeformText must be provided",
@@ -94,6 +99,12 @@ const updateEntrySchema = z
       .refine(isValidObjectId, { message: "Invalid recipe ID format" })
       .optional(),
     freeformText: z.string().max(500).trim().optional(),
+    scheduledTime: z
+      .string()
+      .regex(/^\d{2}:\d{2}$/, "Time must be in HH:mm format")
+      .optional()
+      .nullable(),
+    prepTime: z.number().int().min(0).max(1440).optional().nullable(),
   })
   .refine(
     (data) =>
