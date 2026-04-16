@@ -10,6 +10,7 @@ import { usersPage, userDetail, banUser, unbanUser, updateUser, grantPremium, re
 import {
   recipesPage,
   toggleHideRecipe,
+  toggleFeatureRecipe,
   deleteRecipe,
   recipeDetail,
   updateRecipe,
@@ -71,6 +72,7 @@ router.post("/api/users/:id/grant-premium", csrfProtection, grantPremium);
 router.post("/api/users/:id/revoke-premium", csrfProtection, revokePremium);
 router.get("/api/recipes/:id", recipeDetail);
 router.post("/api/recipes/:id/toggle-hide", csrfProtection, toggleHideRecipe);
+router.post("/api/recipes/:id/toggle-feature", csrfProtection, toggleFeatureRecipe);
 router.put("/api/recipes/:id", csrfProtection, updateRecipe);
 router.delete("/api/recipes/:id", csrfProtection, deleteRecipe);
 router.post("/api/reports/:id/review", csrfProtection, reviewReport);

@@ -49,6 +49,8 @@ export interface IRecipe extends Document {
   seasonalTags: string[];
   likesCount: number;
   forksCount: number;
+  isFeatured: boolean;
+  featuredAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -203,6 +205,14 @@ const recipeSchema = new Schema<IRecipe>(
       type: Number,
       default: 0,
     },
+    isFeatured: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    featuredAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
@@ -223,6 +233,12 @@ recipeSchema.index({ createdAt: -1 });
 
 // Text index for search
 recipeSchema.index({ title: "text", "ingredients.name": "text" });
+
+// Partial index for fast lookup of the currently featured recipe
+recipeSchema.index(
+  { isFeatured: 1 },
+  { partialFilterExpression: { isFeatured: true } }
+);
 
 const Recipe =
   (mongoose.models.Recipe as mongoose.Model<IRecipe>) ||

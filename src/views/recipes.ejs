@@ -24,6 +24,9 @@
     <a href="/admin/recipes?filter=hidden&search=<%= search %>" class="filter-chip <%= filter === 'hidden' ? 'active' : '' %>">
       <i class="fas fa-eye-slash"></i> Hidden
     </a>
+    <a href="/admin/recipes?filter=featured&search=<%= search %>" class="filter-chip <%= filter === 'featured' ? 'active' : '' %>">
+      <i class="fas fa-star"></i> Featured
+    </a>
     <a href="/admin/recipes?filter=all&search=<%= search %>" class="filter-chip <%= filter === 'all' ? 'active' : '' %>">
       All
     </a>
@@ -75,13 +78,16 @@
           </td>
           <td>
             <div class="badge-group">
+              <% if (recipe.isFeatured) { %>
+                <span class="badge badge-warning"><i class="fas fa-star"></i> Featured</span>
+              <% } %>
               <% if (recipe.isHidden) { %>
                 <span class="badge badge-warning">Hidden</span>
               <% } %>
               <% if (recipe.isPrivate) { %>
                 <span class="badge badge-default">Private</span>
               <% } %>
-              <% if (!recipe.isHidden && !recipe.isPrivate) { %>
+              <% if (!recipe.isHidden && !recipe.isPrivate && !recipe.isFeatured) { %>
                 <span class="badge badge-success">Visible</span>
               <% } %>
             </div>
@@ -99,6 +105,13 @@
                       onclick="toggleHide('<%= recipe._id %>')"
                       aria-label="<%= recipe.isHidden ? 'Show' : 'Hide' %> recipe">
                 <i class="fas fa-<%= recipe.isHidden ? 'eye' : 'eye-slash' %>"></i>
+              </button>
+              <button class="btn btn-sm btn-warning-outline"
+                      onclick="toggleFeature('<%= recipe._id %>')"
+                      aria-label="<%= recipe.isFeatured ? 'Unfeature' : 'Feature' %> recipe"
+                      title="<%= (recipe.isPrivate || recipe.isHidden) && !recipe.isFeatured ? 'Make the recipe public and visible before featuring' : (recipe.isFeatured ? 'Unfeature recipe' : 'Feature recipe on home') %>"
+                      <%= (recipe.isPrivate || recipe.isHidden) && !recipe.isFeatured ? 'disabled' : '' %>>
+                <i class="<%= recipe.isFeatured ? 'fas' : 'far' %> fa-star"></i>
               </button>
               <button class="btn btn-sm btn-danger-outline" data-id="<%= recipe._id %>" data-title="<%= recipe.title %>" onclick="deleteRecipe(this.dataset.id, this.dataset.title)" aria-label="Delete recipe">
                 <i class="fas fa-trash"></i>
@@ -252,6 +265,17 @@
         toastAndReload(data.isHidden ? 'Recipe hidden' : 'Recipe visible');
       })
       .catch(() => showToast('Failed to update recipe', 'error'));
+  }
+
+  function toggleFeature(id) {
+    adminFetch('/admin/api/recipes/' + id + '/toggle-feature', { method: 'POST' })
+      .then(data => {
+        toastAndReload(data.isFeatured ? 'Recipe featured' : 'Recipe unfeatured');
+      })
+      .catch(err => {
+        const msg = err && err.message ? err.message : 'Failed to update recipe';
+        showToast(msg, 'error');
+      });
   }
 
   function deleteRecipe(id, title) {

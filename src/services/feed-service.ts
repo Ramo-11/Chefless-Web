@@ -190,6 +190,70 @@ async function enrichRecipes(
   });
 }
 
+/**
+ * Returns the globally featured recipe enriched for the viewer, or null if
+ * there is no active feature, if the feature is authored by the viewer, or if
+ * the viewer cannot see the author (banned, or private account the viewer
+ * does not follow / share a kitchen with).
+ */
+async function getFeaturedRecipeForViewer(
+  userId: Types.ObjectId,
+  accessiblePrivateIds: Types.ObjectId[]
+): Promise<FeedRecipe | null> {
+  const featured = await Recipe.findOne({
+    isFeatured: true,
+    isHidden: { $ne: true },
+    isPrivate: false,
+  })
+    .sort({ featuredAt: -1 })
+    .lean<LeanRecipe | null>();
+
+  if (!featured) return null;
+
+  // Feeds always exclude the viewer's own recipes — keep parity here.
+  if (featured.authorId.equals(userId)) return null;
+
+  const author = await User.findById(featured.authorId)
+    .select("isPublic isBanned")
+    .lean<Pick<IUser, "isPublic" | "isBanned"> | null>();
+
+  if (!author || author.isBanned) return null;
+
+  const authorIsPublic = author.isPublic === true;
+  const viewerHasAccess = accessiblePrivateIds.some((id) =>
+    id.equals(featured.authorId)
+  );
+  if (!authorIsPublic && !viewerHasAccess) return null;
+
+  const [enriched] = await enrichRecipes([featured], userId);
+  return enriched ?? null;
+}
+
+/**
+ * Prepends the featured recipe to a page-1 result set, deduplicating it from
+ * the algorithmic result if it was already included. Adjusts `total` only
+ * when the featured recipe was NOT already in the base list.
+ */
+function applyFeaturedToPage(
+  recipes: FeedRecipe[],
+  total: number,
+  featured: FeedRecipe | null,
+  page: number
+): { recipes: FeedRecipe[]; total: number } {
+  if (!featured || page !== 1) {
+    return { recipes, total };
+  }
+  const featuredId = featured._id.toString();
+  const existedInBase = recipes.some((r) => r._id.toString() === featuredId);
+  const deduped = existedInBase
+    ? recipes.filter((r) => r._id.toString() !== featuredId)
+    : recipes;
+  return {
+    recipes: [featured, ...deduped],
+    total: existedInBase ? total : total + 1,
+  };
+}
+
 // ── Feed Algorithms ────────────────────────────────────────────────────────────
 
 /**
@@ -210,6 +274,7 @@ export async function forYouFeed(
   limit: number
 ): Promise<PaginatedFeed> {
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
+  const featuredPromise = getFeaturedRecipeForViewer(userId, accessiblePrivateIds);
 
   // Fetch user preferences
   const currentUser = await User.findById(userId)
@@ -426,14 +491,23 @@ export async function forYouFeed(
     },
   ];
 
-  const [result] = await Recipe.aggregate(pipeline as unknown as PipelineStage[]);
+  const [[result], featured] = await Promise.all([
+    Recipe.aggregate(pipeline as unknown as PipelineStage[]),
+    featuredPromise,
+  ]);
   const recipes = (result?.data ?? []) as LeanRecipe[];
-  const total = (result?.total[0]?.n ?? 0) as number;
+  const baseTotal = (result?.total[0]?.n ?? 0) as number;
 
-  const enriched = await enrichRecipes(recipes, userId);
+  const enrichedBase = await enrichRecipes(recipes, userId);
+  const { recipes: finalRecipes, total } = applyFeaturedToPage(
+    enrichedBase,
+    baseTotal,
+    featured,
+    page
+  );
 
   return {
-    recipes: enriched,
+    recipes: finalRecipes,
     page,
     limit,
     total,
@@ -461,25 +535,34 @@ export async function trendingFeed(
     createdAt: { $gte: sevenDaysAgo },
   };
 
-  const [result] = await Recipe.aggregate([
-    { $match: baseMatch },
-    ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
-    { $sort: { likesCount: -1, forksCount: -1 } },
-    {
-      $facet: {
-        data: [{ $skip: skip }, { $limit: limit }],
-        total: [{ $count: "n" }],
+  const [[result], featured] = await Promise.all([
+    Recipe.aggregate([
+      { $match: baseMatch },
+      ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
+      { $sort: { likesCount: -1, forksCount: -1 } },
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          total: [{ $count: "n" }],
+        },
       },
-    },
-  ] as unknown as PipelineStage[]);
+    ] as unknown as PipelineStage[]),
+    getFeaturedRecipeForViewer(userId, accessiblePrivateIds),
+  ]);
 
   const recipes = (result?.data ?? []) as LeanRecipe[];
-  const total = (result?.total[0]?.n ?? 0) as number;
+  const baseTotal = (result?.total[0]?.n ?? 0) as number;
 
-  const enriched = await enrichRecipes(recipes, userId);
+  const enrichedBase = await enrichRecipes(recipes, userId);
+  const { recipes: finalRecipes, total } = applyFeaturedToPage(
+    enrichedBase,
+    baseTotal,
+    featured,
+    page
+  );
 
   return {
-    recipes: enriched,
+    recipes: finalRecipes,
     page,
     limit,
     total,
@@ -495,11 +578,21 @@ export async function friendsFeed(
   page: number,
   limit: number
 ): Promise<PaginatedFeed> {
+  const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
+  const featuredPromise = getFeaturedRecipeForViewer(userId, accessiblePrivateIds);
   const followingIds = await getFollowingIds(userId);
   const skip = (page - 1) * limit;
 
   if (followingIds.length === 0) {
-    return { recipes: [], page, limit, total: 0, totalPages: 0 };
+    const featured = await featuredPromise;
+    const { recipes, total } = applyFeaturedToPage([], 0, featured, page);
+    return {
+      recipes,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   const filter = {
@@ -508,22 +601,29 @@ export async function friendsFeed(
     isHidden: { $ne: true },
   };
 
-  const [recipes, total] = await Promise.all([
+  const [recipes, baseTotal, featured] = await Promise.all([
     Recipe.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     Recipe.countDocuments(filter),
+    featuredPromise,
   ]);
 
-  const enriched = await enrichRecipes(
+  const enrichedBase = await enrichRecipes(
     recipes as LeanRecipe[],
     userId
   );
+  const { recipes: finalRecipes, total } = applyFeaturedToPage(
+    enrichedBase,
+    baseTotal,
+    featured,
+    page
+  );
 
   return {
-    recipes: enriched,
+    recipes: finalRecipes,
     page,
     limit,
     total,
@@ -568,25 +668,34 @@ export async function seasonalFeed(
     baseMatch.createdAt = { $gte: fourteenDaysAgo };
   }
 
-  const [result] = await Recipe.aggregate([
-    { $match: baseMatch },
-    ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
-    { $sort: { likesCount: -1, createdAt: -1 } },
-    {
-      $facet: {
-        data: [{ $skip: skip }, { $limit: limit }],
-        total: [{ $count: "n" }],
+  const [[result], featured] = await Promise.all([
+    Recipe.aggregate([
+      { $match: baseMatch },
+      ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
+      { $sort: { likesCount: -1, createdAt: -1 } },
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          total: [{ $count: "n" }],
+        },
       },
-    },
-  ] as unknown as PipelineStage[]);
+    ] as unknown as PipelineStage[]),
+    getFeaturedRecipeForViewer(userId, accessiblePrivateIds),
+  ]);
 
   const recipes = (result?.data ?? []) as LeanRecipe[];
-  const total = (result?.total[0]?.n ?? 0) as number;
+  const baseTotal = (result?.total[0]?.n ?? 0) as number;
 
-  const enriched = await enrichRecipes(recipes, userId);
+  const enrichedBase = await enrichRecipes(recipes, userId);
+  const { recipes: finalRecipes, total } = applyFeaturedToPage(
+    enrichedBase,
+    baseTotal,
+    featured,
+    page
+  );
 
   return {
-    recipes: enriched,
+    recipes: finalRecipes,
     page,
     limit,
     total,

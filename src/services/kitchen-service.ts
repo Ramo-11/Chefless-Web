@@ -620,10 +620,6 @@ export async function sendKitchenInvite(
     throw createError("Kitchen not found", 404);
   }
 
-  if (!kitchen.leadId.equals(senderId)) {
-    throw createError("Only the kitchen lead can send invites", 403);
-  }
-
   const recipient = await User.findById(recipientUserId)
     .select("kitchenId isBanned")
     .lean();
