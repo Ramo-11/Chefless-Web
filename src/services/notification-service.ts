@@ -23,6 +23,7 @@ interface CreateNotificationParams {
   kitchenId?: Types.ObjectId;
   kitchenName?: string;
   scheduleEntryId?: Types.ObjectId;
+  inviteId?: Types.ObjectId;
   pushTitle?: string;
   pushBody?: string;
 }
@@ -52,13 +53,24 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
     case "follow_accepted":
       return params.actorId ? `/user/${params.actorId}` : null;
     case "schedule_suggestion":
+      // Approver-facing — land them on the pending suggestions list.
+      return "/schedule/suggestions";
     case "suggestion_approved":
     case "suggestion_denied":
+      // Suggester-facing — land them on the main schedule.
       return "/schedule";
     case "kitchen_joined":
     case "kitchen_invite":
     case "kitchen_removed":
+    case "kitchen_invite_accepted":
+      // Accepting lands the user in the kitchen screen; the sender tapping
+      // the "accepted" receipt also wants the kitchen view.
       return "/kitchen";
+    case "kitchen_invite_received":
+    case "kitchen_invite_declined":
+      // Received invites host Accept/Decline inline; decline receipts have
+      // no dedicated screen. Both route to the notifications feed.
+      return "/notifications";
     default:
       return "/notifications";
   }
@@ -98,6 +110,7 @@ export async function createNotification(
     kitchenId: params.kitchenId,
     kitchenName: params.kitchenName,
     scheduleEntryId: params.scheduleEntryId,
+    inviteId: params.inviteId,
   });
 
   // Send push notification if user has an FCM token
@@ -118,6 +131,9 @@ export async function createNotification(
     }
     if (params.kitchenId) {
       pushData.kitchenId = params.kitchenId.toString();
+    }
+    if (params.inviteId) {
+      pushData.inviteId = params.inviteId.toString();
     }
 
     // Compute a `route` field so the Flutter app can deep-link directly
@@ -414,6 +430,50 @@ export async function notifyScheduleSuggestion(
   await Promise.all(promises);
 }
 
+/**
+ * Notify the lead and all approvers when a member imports their personal
+ * schedule into the kitchen under `lead_only` policy. A single aggregate
+ * notification per approver rather than one per entry to avoid spam.
+ */
+export async function notifyScheduleImportSuggestions(
+  suggesterId: string,
+  kitchenId: string,
+  count: number
+): Promise<void> {
+  if (count <= 0) return;
+
+  const [actor, kitchen] = await Promise.all([
+    getActorData(suggesterId),
+    Kitchen.findById(kitchenId).select("leadId membersWithApprovalPower name").lean(),
+  ]);
+  if (!actor || !kitchen) return;
+
+  const approverIds = new Set<string>();
+  approverIds.add(kitchen.leadId.toString());
+  for (const id of kitchen.membersWithApprovalPower) {
+    approverIds.add(id.toString());
+  }
+  approverIds.delete(suggesterId);
+
+  const mealWord = count === 1 ? "meal" : "meals";
+  const promises = Array.from(approverIds).map((approverId) =>
+    createNotification({
+      userId: new Types.ObjectId(approverId),
+      type: "schedule_suggestion",
+      actorId: actor._id,
+      actorName: actor.fullName,
+      actorPhoto: actor.profilePicture,
+      kitchenId: new Types.ObjectId(kitchenId),
+      kitchenName: kitchen.name,
+      pushTitle: "New Meal Suggestions",
+      pushBody:
+        `${actor.fullName} imported ${count} ${mealWord} as suggestions in ${kitchen.name}.`,
+    })
+  );
+
+  await Promise.all(promises);
+}
+
 export async function notifySuggestionApproved(
   entryId: string
 ): Promise<void> {
@@ -535,5 +595,91 @@ export async function notifyKitchenRemoved(
     kitchenName,
     pushTitle: "Removed from Kitchen",
     pushBody: `You were removed from ${kitchenName}.`,
+  });
+}
+
+/**
+ * Notify the recipient of an in-app kitchen invite. Creates a tile with
+ * inline Accept/Decline buttons (the UI keys off `inviteId`).
+ */
+export async function notifyKitchenInviteReceived(
+  senderId: string,
+  recipientId: string,
+  kitchenId: string,
+  inviteId: string
+): Promise<void> {
+  if (senderId === recipientId) return;
+
+  const [actor, kitchen] = await Promise.all([
+    getActorData(senderId),
+    Kitchen.findById(kitchenId).select("name").lean(),
+  ]);
+  if (!actor || !kitchen) return;
+
+  await createNotification({
+    userId: new Types.ObjectId(recipientId),
+    type: "kitchen_invite_received",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    kitchenId: new Types.ObjectId(kitchenId),
+    kitchenName: kitchen.name,
+    inviteId: new Types.ObjectId(inviteId),
+    pushTitle: "Kitchen invite",
+    pushBody: `${actor.fullName} invited you to join ${kitchen.name}.`,
+  });
+}
+
+/** Notify the original sender that their invite was accepted. */
+export async function notifyKitchenInviteAccepted(
+  accepterId: string,
+  kitchenId: string,
+  senderId: string
+): Promise<void> {
+  if (accepterId === senderId) return;
+
+  const [actor, kitchen] = await Promise.all([
+    getActorData(accepterId),
+    Kitchen.findById(kitchenId).select("name").lean(),
+  ]);
+  if (!actor || !kitchen) return;
+
+  await createNotification({
+    userId: new Types.ObjectId(senderId),
+    type: "kitchen_invite_accepted",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    kitchenId: new Types.ObjectId(kitchenId),
+    kitchenName: kitchen.name,
+    pushTitle: "Invite accepted",
+    pushBody: `${actor.fullName} joined ${kitchen.name}.`,
+  });
+}
+
+/** Notify the original sender that their invite was declined. */
+export async function notifyKitchenInviteDeclined(
+  declinerId: string,
+  kitchenId: string,
+  senderId: string
+): Promise<void> {
+  if (declinerId === senderId) return;
+
+  const [actor, kitchen] = await Promise.all([
+    getActorData(declinerId),
+    Kitchen.findById(kitchenId).select("name").lean(),
+  ]);
+  if (!actor || !kitchen) return;
+
+  await createNotification({
+    userId: new Types.ObjectId(senderId),
+    type: "kitchen_invite_declined",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    kitchenId: new Types.ObjectId(kitchenId),
+    kitchenName: kitchen.name,
+    pushTitle: "Invite declined",
+    pushBody: `${actor.fullName} declined your kitchen invite.`,
   });
 }

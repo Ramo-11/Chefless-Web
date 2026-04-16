@@ -3,6 +3,7 @@ import { z } from "zod";
 import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
+import { strictLimiter } from "../middleware/rateLimit";
 import User from "../models/User";
 import Kitchen from "../models/Kitchen";
 import {
@@ -17,6 +18,11 @@ import {
   updatePermissions,
   regenerateInviteCode,
   getKitchenRecipes,
+  sendKitchenInvite,
+  acceptKitchenInvite,
+  declineKitchenInvite,
+  listPendingInvitesForRecipient,
+  cancelKitchenInvite,
   INVITE_CODE_REGEX,
 } from "../services/kitchen-service";
 
@@ -52,6 +58,7 @@ const updateKitchenSchema = z.object({
   name: z.string().min(1).max(100).trim().optional(),
   photo: z.string().url().optional(),
   isPublic: z.boolean().optional(),
+  scheduleAddPolicy: z.enum(["lead_only", "all"]).optional(),
 });
 
 const joinKitchenSchema = z.object({
@@ -335,6 +342,125 @@ router.get(
       total: result.total,
       totalPages: result.totalPages,
     });
+  })
+);
+
+// --- In-App Invites ---
+
+const sendInviteSchema = z.object({
+  recipientUserId: z
+    .string()
+    .refine(isValidObjectId, { message: "Invalid user ID format" }),
+});
+
+// POST /api/kitchens/invites — Send an in-app invite to another user (lead only)
+// `strictLimiter` applied because this endpoint triggers a push notification
+// on success; tighter rate limit prevents abuse.
+router.post(
+  "/invites",
+  requireAuth,
+  strictLimiter,
+  validate({ body: sendInviteSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { recipientUserId } = req.body as z.infer<typeof sendInviteSchema>;
+    const invite = await sendKitchenInvite(
+      currentUser._id.toString(),
+      recipientUserId
+    );
+
+    res.status(201).json({ invite });
+  })
+);
+
+// GET /api/kitchens/invites — Pending invites for the current user (recipient view)
+router.get(
+  "/invites",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const invites = await listPendingInvitesForRecipient(
+      currentUser._id.toString()
+    );
+
+    res.status(200).json({ invites });
+  })
+);
+
+// POST /api/kitchens/invites/:id/accept — Accept a pending invite
+router.post(
+  "/invites/:id/accept",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const result = await acceptKitchenInvite(currentUser._id.toString(), id);
+
+    res.status(200).json(result);
+  })
+);
+
+// POST /api/kitchens/invites/:id/decline — Decline a pending invite
+router.post(
+  "/invites/:id/decline",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const result = await declineKitchenInvite(currentUser._id.toString(), id);
+
+    res.status(200).json(result);
+  })
+);
+
+// DELETE /api/kitchens/invites/:id — Cancel a pending invite (sender only)
+router.delete(
+  "/invites/:id",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    await cancelKitchenInvite(currentUser._id.toString(), id);
+
+    res.status(200).json({ success: true });
   })
 );
 

@@ -92,6 +92,39 @@ export async function kitchenDetail(
   }
 }
 
+/**
+ * Read-only listing of pending schedule suggestions for a kitchen. Surfaced
+ * inside the admin kitchen detail modal. Admin cannot approve/deny here —
+ * this is for visibility and moderation triage only.
+ */
+export async function kitchenSuggestions(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const kitchen = await Kitchen.findById(req.params.id).select("_id").lean();
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    const suggestions = await ScheduleEntry.find({
+      kitchenId: kitchen._id,
+      status: "suggested",
+    })
+      .sort({ date: 1, createdAt: 1 })
+      .populate<{
+        suggestedBy: { _id: string; fullName: string; profilePicture?: string } | null;
+      }>("suggestedBy", "fullName profilePicture")
+      .lean();
+
+    res.json({ suggestions });
+  } catch (error) {
+    console.error("Failed to load kitchen suggestions:", error);
+    res.status(500).json({ error: "Failed to load suggestions" });
+  }
+}
+
 export async function updateKitchen(
   req: Request,
   res: Response

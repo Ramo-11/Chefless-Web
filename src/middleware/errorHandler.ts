@@ -43,6 +43,19 @@ export function errorHandler(
     return;
   }
 
+  // Mongo duplicate-key errors — convert to a friendly 409. Individual
+  // services should ideally catch these locally and surface a context-specific
+  // message, but this guards against any that slip through.
+  if (
+    err !== null &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code?: number }).code === 11000
+  ) {
+    res.status(409).json({ error: "This entry already exists." });
+    return;
+  }
+
   // Custom app errors with status code
   if (err.statusCode) {
     res.status(err.statusCode).json({ error: err.message });

@@ -5,6 +5,7 @@ import Recipe from "../models/Recipe";
 import User from "../models/User";
 import {
   notifyScheduleSuggestion,
+  notifyScheduleImportSuggestions,
   notifySuggestionApproved,
   notifySuggestionDeniedWithData,
 } from "./notification-service";
@@ -139,7 +140,8 @@ export async function addEntry(
   }
 
   const canEdit = hasScheduleEditPermission(userId, kitchen);
-  const status = canEdit ? "confirmed" : "suggested";
+  const status =
+    kitchen.scheduleAddPolicy === "all" || canEdit ? "confirmed" : "suggested";
 
   const entryFields: Record<string, unknown> = {
     kitchenId: new Types.ObjectId(kitchenId),
@@ -518,7 +520,9 @@ export async function importToKitchen(
   startDate: Date,
   endDate: Date
 ): Promise<number> {
-  const user = await User.findById(userId).select("kitchenId").lean();
+  const user = await User.findById(userId)
+    .select("kitchenId isPremium premiumExpiresAt")
+    .lean();
   if (!user) {
     throw createError("User not found", 404);
   }
@@ -535,6 +539,15 @@ export async function importToKitchen(
   const start = stripTime(startDate);
   const end = stripTime(endDate);
 
+  // Free-tier members can only import within the free-tier planning window.
+  // Enforce on the end date so imports past the cutoff are rejected cleanly.
+  if (!hasActivePremium(user) && isBeyondFreeTierScheduleLimit(end)) {
+    throw createError(
+      "Free tier users can plan through the end of next week only. Upgrade to premium for monthly scheduling.",
+      403
+    );
+  }
+
   // Fetch the user's personal entries within the date range
   const personalEntries = await ScheduleEntry.find({
     userId: new Types.ObjectId(userId),
@@ -547,7 +560,8 @@ export async function importToKitchen(
   }
 
   const canEdit = hasScheduleEditPermission(userId, kitchen);
-  const status = canEdit ? "confirmed" : "suggested";
+  const status =
+    kitchen.scheduleAddPolicy === "all" || canEdit ? "confirmed" : "suggested";
 
   const kitchenEntries = personalEntries.map((entry) => ({
     kitchenId: new Types.ObjectId(kitchenId),
@@ -568,5 +582,19 @@ export async function importToKitchen(
   }));
 
   const result = await ScheduleEntry.insertMany(kitchenEntries);
+
+  // If the imported entries are suggestions, send a single aggregate
+  // notification to the lead + approvers (avoids per-entry spam).
+  if (status === "suggested") {
+    notifyScheduleImportSuggestions(userId, kitchenId, result.length).catch(
+      (err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        console.error(
+          `Failed to send schedule_suggestion import notification: ${msg}`
+        );
+      }
+    );
+  }
+
   return result.length;
 }

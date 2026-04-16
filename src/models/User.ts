@@ -20,6 +20,9 @@ export interface NotificationPreferences {
   suggestion_approved: boolean;
   suggestion_denied: boolean;
   kitchen_invite: boolean;
+  kitchen_invite_received: boolean;
+  kitchen_invite_accepted: boolean;
+  kitchen_invite_declined: boolean;
   kitchen_joined: boolean;
   kitchen_removed: boolean;
   system: boolean;
@@ -36,6 +39,9 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   suggestion_approved: true,
   suggestion_denied: true,
   kitchen_invite: true,
+  kitchen_invite_received: true,
+  kitchen_invite_accepted: true,
+  kitchen_invite_declined: true,
   kitchen_joined: true,
   kitchen_removed: true,
   system: true,
@@ -176,6 +182,9 @@ const userSchema = new Schema<IUser>(
         suggestion_approved: { type: Boolean, default: true },
         suggestion_denied: { type: Boolean, default: true },
         kitchen_invite: { type: Boolean, default: true },
+        kitchen_invite_received: { type: Boolean, default: true },
+        kitchen_invite_accepted: { type: Boolean, default: true },
+        kitchen_invite_declined: { type: Boolean, default: true },
         kitchen_joined: { type: Boolean, default: true },
         kitchen_removed: { type: Boolean, default: true },
         system: { type: Boolean, default: true },

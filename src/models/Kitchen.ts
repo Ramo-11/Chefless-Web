@@ -12,6 +12,13 @@ export interface IKitchen extends Document {
   memberCount: number;
   /** Custom meal slot names added by the kitchen lead (e.g. "Pre-Workout", "Late Night"). */
   customMealSlots: string[];
+  /**
+   * Controls who can add schedule entries directly.
+   * - `"lead_only"`: only the lead and members in `membersWithScheduleEdit` add directly;
+   *   everyone else's additions become suggestions awaiting approval.
+   * - `"all"`: any kitchen member adds entries directly (confirmed).
+   */
+  scheduleAddPolicy: "lead_only" | "all";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -66,6 +73,11 @@ const kitchenSchema = new Schema<IKitchen>(
         validator: (v: string[]) => v.length <= 20,
         message: "Maximum 20 custom meal slots allowed",
       },
+    },
+    scheduleAddPolicy: {
+      type: String,
+      enum: ["lead_only", "all"],
+      default: "lead_only",
     },
   },
   {

@@ -38,6 +38,7 @@ import {
 import {
   kitchensPage,
   kitchenDetail,
+  kitchenSuggestions,
   updateKitchen,
   removeKitchenMember,
   transferKitchenLead,
@@ -87,6 +88,7 @@ router.post("/api/promo-codes", csrfProtection, createPromoCode);
 router.put("/api/promo-codes/:id", csrfProtection, updatePromoCode);
 router.delete("/api/promo-codes/:id", csrfProtection, deletePromoCode);
 router.get("/api/kitchens/:id", kitchenDetail);
+router.get("/api/kitchens/:id/suggestions", kitchenSuggestions);
 router.put("/api/kitchens/:id", csrfProtection, updateKitchen);
 router.post("/api/kitchens/:id/remove-member", csrfProtection, removeKitchenMember);
 router.post("/api/kitchens/:id/transfer-lead", csrfProtection, transferKitchenLead);

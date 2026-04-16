@@ -11,6 +11,9 @@ export const NOTIFICATION_TYPES = [
   "suggestion_approved",
   "suggestion_denied",
   "kitchen_invite", // Welcome / invite receipt for members who join a kitchen
+  "kitchen_invite_received", // In-app invite from a kitchen lead; renders Accept/Decline
+  "kitchen_invite_accepted", // Sent to the sender when recipient accepts
+  "kitchen_invite_declined", // Sent to the sender when recipient declines
   "kitchen_joined",
   "kitchen_removed",
   "system",
@@ -31,6 +34,9 @@ export interface INotification extends Document {
   kitchenId?: Types.ObjectId;
   kitchenName?: string;
   scheduleEntryId?: Types.ObjectId;
+  /** Set on `kitchen_invite_received` so the tile can render inline
+   *  Accept/Decline buttons. */
+  inviteId?: Types.ObjectId;
   isRead: boolean;
   createdAt: Date;
 }
@@ -67,6 +73,10 @@ const notificationSchema = new Schema<INotification>(
     scheduleEntryId: {
       type: Schema.Types.ObjectId,
       ref: "ScheduleEntry",
+    },
+    inviteId: {
+      type: Schema.Types.ObjectId,
+      ref: "KitchenInvite",
     },
     isRead: {
       type: Boolean,

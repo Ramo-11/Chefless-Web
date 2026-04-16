@@ -142,10 +142,14 @@
   function viewKitchen(id) {
     openModal('kitchen-detail-modal');
     document.getElementById('kitchen-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
-    adminFetch('/admin/api/kitchens/' + id)
-      .then(data => {
+    Promise.all([
+      adminFetch('/admin/api/kitchens/' + id),
+      adminFetch('/admin/api/kitchens/' + id + '/suggestions').catch(() => ({ suggestions: [] })),
+    ])
+      .then(([data, suggestionsData]) => {
         const k = data.kitchen;
         const members = data.members || [];
+        const suggestions = (suggestionsData && suggestionsData.suggestions) || [];
         const leadId = k.leadId ? (k.leadId._id || k.leadId) : null;
         const leadIdStr = leadId ? leadId.toString() : '';
 
@@ -196,6 +200,61 @@
           membersHtml = '<div class="detail-section"><h4>Members</h4><p class="text-muted">No members found</p></div>';
         }
 
+        const policyLabel = k.scheduleAddPolicy === 'all'
+          ? 'All members (direct)'
+          : 'Lead only (others suggest)';
+
+        let suggestionsHtml = '';
+        if (suggestions.length > 0) {
+          suggestionsHtml = `
+            <div class="detail-section">
+              <h4>Pending Suggestions (${suggestions.length})</h4>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Meal</th>
+                      <th>Slot</th>
+                      <th>Date</th>
+                      <th>Suggested by</th>
+                      <th>Submitted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${suggestions.map(s => {
+                      const suggester = s.suggestedBy && s.suggestedBy.fullName
+                        ? esc(s.suggestedBy.fullName)
+                        : '<span class="text-muted">Unknown</span>';
+                      const meal = esc(s.recipeTitle || s.freeformText || 'Untitled');
+                      const slotRaw = (s.mealSlot || '').toString();
+                      const slot = slotRaw
+                        ? esc(slotRaw.charAt(0).toUpperCase() + slotRaw.slice(1))
+                        : '<span class="text-muted">—</span>';
+                      const dateStr = s.date
+                        ? new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                        : '—';
+                      const submittedStr = s.createdAt
+                        ? new Date(s.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                        : '—';
+                      return `
+                        <tr>
+                          <td>${meal}</td>
+                          <td>${slot}</td>
+                          <td class="text-muted">${dateStr}</td>
+                          <td>${suggester}</td>
+                          <td class="text-muted">${submittedStr}</td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        } else {
+          suggestionsHtml = '<div class="detail-section"><h4>Pending Suggestions</h4><p class="text-muted">No pending suggestions</p></div>';
+        }
+
         document.getElementById('kitchen-detail-body').innerHTML = `
           <div class="detail-grid">
             <div class="detail-section">
@@ -204,9 +263,11 @@
               <div class="detail-row"><span>Lead:</span> <span>${k.leadId && k.leadId.fullName ? esc(k.leadId.fullName) : 'Unknown'}</span></div>
               <div class="detail-row"><span>Invite Code:</span> <span><code>${esc(k.inviteCode)}</code></span></div>
               <div class="detail-row"><span>Member Count:</span> <span>${Number(k.memberCount) || 0}</span></div>
+              <div class="detail-row"><span>Schedule Policy:</span> <span>${esc(policyLabel)}</span></div>
               <div class="detail-row"><span>Created:</span> <span>${new Date(k.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
             </div>
             ${membersHtml}
+            ${suggestionsHtml}
           </div>
         `;
       })
