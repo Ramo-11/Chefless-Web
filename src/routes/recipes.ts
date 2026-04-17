@@ -15,6 +15,9 @@ import {
   likeRecipe,
   unlikeRecipe,
   listLikedRecipes,
+  saveRecipe,
+  unsaveRecipe,
+  listSavedRecipes,
   listForkedRecipes,
   shareRecipe,
   listSharedWithMe,
@@ -197,6 +200,27 @@ router.get(
 
     const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
     const result = await listLikedRecipes(user._id.toString(), page, limit);
+
+    res.status(200).json(result);
+  })
+);
+
+// GET /api/recipes/saved — List saved recipes
+router.get(
+  "/saved",
+  requireAuth,
+  validate({ query: paginationSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
+    const result = await listSavedRecipes(user._id.toString(), page, limit);
 
     res.status(200).json(result);
   })
@@ -407,6 +431,48 @@ router.delete(
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     await unlikeRecipe(id, user._id.toString());
+
+    res.status(200).json({ success: true });
+  })
+);
+
+// POST /api/recipes/:id/save — Save recipe
+router.post(
+  "/:id/save",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    await saveRecipe(id, user._id.toString());
+
+    res.status(200).json({ success: true });
+  })
+);
+
+// DELETE /api/recipes/:id/save — Unsave recipe
+router.delete(
+  "/:id/save",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    await unsaveRecipe(id, user._id.toString());
 
     res.status(200).json({ success: true });
   })

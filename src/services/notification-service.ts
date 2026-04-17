@@ -46,6 +46,7 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
   switch (params.type) {
     case "recipe_liked":
     case "recipe_forked":
+    case "recipe_saved":
     case "recipe_shared":
       return params.recipeId ? `/recipe/${params.recipeId}` : null;
     case "new_follower":
@@ -327,6 +328,33 @@ export async function notifyRecipeLiked(
     recipeTitle: recipe.title,
     pushTitle: "Recipe Liked",
     pushBody: `${actor.fullName} liked your recipe "${recipe.title}".`,
+  });
+}
+
+export async function notifyRecipeSaved(
+  saverId: string,
+  recipeId: string
+): Promise<void> {
+  const recipe = await Recipe.findById(recipeId)
+    .select("authorId title")
+    .lean();
+  if (!recipe) return;
+
+  if (saverId === recipe.authorId.toString()) return;
+
+  const actor = await getActorData(saverId);
+  if (!actor) return;
+
+  await createNotification({
+    userId: recipe.authorId,
+    type: "recipe_saved",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    recipeId: new Types.ObjectId(recipeId),
+    recipeTitle: recipe.title,
+    pushTitle: "Recipe Saved",
+    pushBody: `${actor.fullName} saved your recipe "${recipe.title}".`,
   });
 }
 

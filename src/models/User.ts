@@ -15,6 +15,7 @@ export interface NotificationPreferences {
   follow_accepted: boolean;
   recipe_liked: boolean;
   recipe_forked: boolean;
+  recipe_saved: boolean;
   recipe_shared: boolean;
   schedule_suggestion: boolean;
   suggestion_approved: boolean;
@@ -34,6 +35,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   follow_accepted: true,
   recipe_liked: true,
   recipe_forked: true,
+  recipe_saved: true,
   recipe_shared: true,
   schedule_suggestion: true,
   suggestion_approved: true,
@@ -177,6 +179,7 @@ const userSchema = new Schema<IUser>(
         follow_accepted: { type: Boolean, default: true },
         recipe_liked: { type: Boolean, default: true },
         recipe_forked: { type: Boolean, default: true },
+        recipe_saved: { type: Boolean, default: true },
         recipe_shared: { type: Boolean, default: true },
         schedule_suggestion: { type: Boolean, default: true },
         suggestion_approved: { type: Boolean, default: true },

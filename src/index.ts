@@ -13,6 +13,7 @@ import healthRouter from "./routes/health";
 import authRouter from "./routes/auth";
 import usersRouter from "./routes/users";
 import recipesRouter from "./routes/recipes";
+import cookbooksRouter from "./routes/cookbooks";
 import kitchensRouter from "./routes/kitchens";
 import scheduleRouter from "./routes/schedules";
 import shoppingListsRouter from "./routes/shopping-lists";
@@ -104,6 +105,7 @@ app.use("/api/auth", jsonDefault, strictLimiter, authRouter);
 // Upload routes need a higher body limit for base64 image data
 app.use("/api/users", jsonUpload, usersRouter);
 app.use("/api/recipes", jsonUpload, recipesRouter);
+app.use("/api/cookbooks", jsonUpload, cookbooksRouter);
 app.use("/api/kitchens", jsonDefault, kitchensRouter);
 app.use("/api/schedule", jsonDefault, scheduleRouter);
 app.use("/api/shopping-lists", jsonDefault, shoppingListsRouter);

@@ -6,6 +6,7 @@ export const NOTIFICATION_TYPES = [
   "follow_accepted",
   "recipe_liked",
   "recipe_forked",
+  "recipe_saved",
   "recipe_shared",
   "schedule_suggestion",
   "suggestion_approved",

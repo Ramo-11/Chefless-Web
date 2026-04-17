@@ -449,6 +449,37 @@ router.get(
   })
 );
 
+// GET /api/users/:id/cookbooks — List a user's public cookbooks
+router.get(
+  "/:id/cookbooks",
+  requireAuth,
+  validate({ params: objectIdParam, query: paginationSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const { page, limit } = req.query as unknown as z.infer<
+      typeof paginationSchema
+    >;
+
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!currentUser) {
+      res.status(401).json({ error: "User not found. Please register first." });
+      return;
+    }
+
+    const { listUserCookbooks } = await import(
+      "../services/cookbook-service"
+    );
+    const result = await listUserCookbooks(
+      id,
+      currentUser._id.toString(),
+      page,
+      limit
+    );
+    res.status(200).json(result);
+  })
+);
+
 // POST /api/users/:id/follow
 router.post(
   "/:id/follow",

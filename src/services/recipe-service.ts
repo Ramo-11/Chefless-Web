@@ -1,6 +1,7 @@
 import { Types, FilterQuery } from "mongoose";
 import Recipe, { IRecipe, IIngredient, IStep } from "../models/Recipe";
 import Like from "../models/Like";
+import SavedRecipe from "../models/SavedRecipe";
 import RecipeShare from "../models/RecipeShare";
 import User from "../models/User";
 import { canViewRecipe } from "./visibility-service";
@@ -8,6 +9,7 @@ import { uploadImage } from "../lib/cloudinary";
 import {
   notifyRecipeLiked,
   notifyRecipeForked,
+  notifyRecipeSaved,
   notifyRecipeShared,
 } from "./notification-service";
 import { hasActivePremium } from "../lib/premium";
@@ -207,14 +209,14 @@ export async function getRecipe(
     }
   }
 
-  // Check if the requester has liked this recipe.
+  // Check if the requester has liked / saved this recipe.
   if (viewerId) {
-    const Like = (await import("../models/Like")).default;
-    const liked = await Like.exists({
-      userId: viewerId,
-      recipeId: recipe._id,
-    });
+    const [liked, saved] = await Promise.all([
+      Like.exists({ userId: viewerId, recipeId: recipe._id }),
+      SavedRecipe.exists({ userId: viewerId, recipeId: recipe._id }),
+    ]);
     recipeObj.isLiked = !!liked;
+    recipeObj.isSaved = !!saved;
   }
 
   return recipeObj as unknown as IRecipe;
@@ -311,10 +313,11 @@ export async function deleteRecipe(
     );
   }
 
-  // Delete all likes and shares associated with this recipe
+  // Delete all likes, saves, and shares associated with this recipe
   // Also clear forkedFrom on any recipes that were forked from this one
   await Promise.all([
     Like.deleteMany({ recipeId: recipe._id }),
+    SavedRecipe.deleteMany({ recipeId: recipe._id }),
     RecipeShare.deleteMany({ recipeId: recipe._id }),
     Recipe.updateMany(
       { "forkedFrom.recipeId": recipe._id },
@@ -633,6 +636,95 @@ export async function listLikedRecipes(
   const recipes = await Recipe.find({ _id: { $in: recipeIds } }).lean<IRecipe[]>();
 
   // Maintain the order from likes (newest liked first)
+  const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
+  const orderedRecipes = recipeIds
+    .map((id) => recipeMap.get(id.toString()))
+    .filter((r): r is IRecipe => r !== undefined);
+
+  return {
+    data: orderedRecipes,
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
+  };
+}
+
+export async function saveRecipe(
+  recipeId: string,
+  userId: string
+): Promise<void> {
+  const recipe = await Recipe.findById(recipeId);
+  if (!recipe) {
+    throw createError("Recipe not found", 404);
+  }
+
+  const author = await User.findById(recipe.authorId);
+  if (!author) {
+    throw createError("Recipe author not found", 404);
+  }
+
+  const canView = await canViewRecipe(new Types.ObjectId(userId), recipe, author);
+  if (!canView) {
+    throw createError("You do not have permission to save this recipe", 403);
+  }
+
+  try {
+    await SavedRecipe.create({
+      userId: new Types.ObjectId(userId),
+      recipeId: new Types.ObjectId(recipeId),
+    });
+
+    notifyRecipeSaved(userId, recipeId).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`Failed to send recipe_saved notification: ${msg}`);
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      "code" in err &&
+      (err as Error & { code: number }).code === 11000
+    ) {
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function unsaveRecipe(
+  recipeId: string,
+  userId: string
+): Promise<void> {
+  const result = await SavedRecipe.findOneAndDelete({
+    userId: new Types.ObjectId(userId),
+    recipeId: new Types.ObjectId(recipeId),
+  });
+
+  if (!result) {
+    throw createError("You have not saved this recipe", 404);
+  }
+}
+
+export async function listSavedRecipes(
+  userId: string,
+  page: number,
+  limit: number
+): Promise<PaginatedRecipes> {
+  const skip = (page - 1) * limit;
+  const objectId = new Types.ObjectId(userId);
+
+  const [saved, total] = await Promise.all([
+    SavedRecipe.find({ userId: objectId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    SavedRecipe.countDocuments({ userId: objectId }),
+  ]);
+
+  const recipeIds = saved.map((s) => s.recipeId);
+  const recipes = await Recipe.find({ _id: { $in: recipeIds } }).lean<IRecipe[]>();
+
   const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
   const orderedRecipes = recipeIds
     .map((id) => recipeMap.get(id.toString()))
