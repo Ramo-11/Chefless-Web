@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import { randomInt } from "crypto";
 import Kitchen, { IKitchen } from "../models/Kitchen";
 import User, { IUser } from "../models/User";
 import Recipe, { IRecipe } from "../models/Recipe";
@@ -19,6 +20,18 @@ const FREE_TIER_MAX_MEMBERS = 4;
 /** Regex for validating invite codes. Shared with route validation. */
 export const INVITE_CODE_REGEX = /^CHEF-[A-Z0-9]{6}$/;
 
+/**
+ * How long a newly minted invite code is accepted by `joinKitchen`. After this
+ * window the lead must call `regenerateInviteCode` to mint a fresh one. This
+ * caps long-lived codes from floating around in group chats or email threads
+ * forever and limits the window for brute-force guessing.
+ */
+const INVITE_CODE_TTL_DAYS = 30;
+
+function nextInviteCodeExpiry(): Date {
+  return new Date(Date.now() + INVITE_CODE_TTL_DAYS * 24 * 60 * 60 * 1000);
+}
+
 interface ServiceError extends Error {
   statusCode: number;
 }
@@ -30,10 +43,13 @@ function createError(message: string, statusCode: number): ServiceError {
 }
 
 function generateInviteCode(): string {
+  // Use crypto.randomInt so codes cannot be predicted by an attacker observing
+  // timing or other state. Math.random is not cryptographically secure and must
+  // never be used for security-relevant tokens like invite codes.
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let code = "CHEF-";
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(randomInt(0, chars.length));
   }
   return code;
 }
@@ -89,6 +105,7 @@ export async function createKitchen(
     name,
     leadId: new Types.ObjectId(userId),
     inviteCode,
+    inviteCodeExpiresAt: nextInviteCodeExpiry(),
     photo,
     membersWithScheduleEdit: [],
     membersWithApprovalPower: [],
@@ -217,6 +234,20 @@ export async function joinKitchen(
   const kitchen = await Kitchen.findOne({ inviteCode });
   if (!kitchen) {
     throw createError("Invalid invite code", 404);
+  }
+
+  // Invite codes expire 30 days after issue. Legacy kitchens created before
+  // the expiry feature shipped have `inviteCodeExpiresAt` undefined and are
+  // grandfathered through as non-expiring; new and regenerated codes always
+  // have a concrete expiry.
+  if (
+    kitchen.inviteCodeExpiresAt &&
+    kitchen.inviteCodeExpiresAt.getTime() < Date.now()
+  ) {
+    throw createError(
+      "This invite code has expired. Ask the kitchen lead to share a fresh one.",
+      410
+    );
   }
 
   // Check capacity based on lead's premium status
@@ -445,12 +476,29 @@ export async function transferLead(
     throw createError("Target user is not a member of this kitchen", 404);
   }
 
-  const updated = await Kitchen.findByIdAndUpdate(
-    kitchen._id,
-    { $set: { leadId: new Types.ObjectId(newLeadId) } },
-    { new: true }
+  // Atomic conditional update: only transfer if `leadId` still equals the
+  // pre-check value. If another request transferred or changed the lead in
+  // the meantime, modifiedCount is 0 and we surface a 409 rather than
+  // silently overwriting someone else's transfer.
+  const result = await Kitchen.updateOne(
+    { _id: kitchen._id, leadId: new Types.ObjectId(currentLeadId) },
+    { $set: { leadId: new Types.ObjectId(newLeadId) } }
   );
 
+  if (result.modifiedCount === 0) {
+    throw createError("Lead changed concurrently. Please refresh and try again.", 409);
+  }
+
+  // The ex-lead's pending invites should no longer carry their authority. Keep
+  // them out of the recipient's inbox by deleting silently — the new lead can
+  // re-invite anyone they want.
+  await KitchenInvite.deleteMany({
+    kitchenId: kitchen._id,
+    senderId: new Types.ObjectId(currentLeadId),
+    status: "pending",
+  });
+
+  const updated = await Kitchen.findById(kitchen._id);
   if (!updated) {
     throw createError("Kitchen not found", 404);
   }
@@ -541,7 +589,12 @@ export async function regenerateInviteCode(
 
   const updated = await Kitchen.findByIdAndUpdate(
     kitchen._id,
-    { $set: { inviteCode: newCode } },
+    {
+      $set: {
+        inviteCode: newCode,
+        inviteCodeExpiresAt: nextInviteCodeExpiry(),
+      },
+    },
     { new: true }
   );
 
@@ -847,6 +900,19 @@ export async function cancelKitchenInvite(
   await KitchenInvite.deleteOne({ _id: invite._id });
 }
 
+/**
+ * Returns shared (non-private) recipes by active members of this kitchen.
+ *
+ * Visibility rules (per ARCHITECTURE.md):
+ * - Co-members can see each other's **shared** recipes regardless of the
+ *   author's account privacy (kitchen membership grants implicit recipe-level
+ *   visibility).
+ * - Private recipes are NEVER included — they remain invisible even to
+ *   fellow kitchen members.
+ * - Hidden recipes (moderated) and recipes by banned authors are excluded.
+ * - When a specific `memberId` is requested, it must be a current member;
+ *   otherwise the caller gets 400.
+ */
 export async function getKitchenRecipes(
   kitchenId: string,
   page: number,
@@ -857,11 +923,17 @@ export async function getKitchenRecipes(
   const kitchenObjectId = new Types.ObjectId(kitchenId);
   const memberObjectId = memberId ? new Types.ObjectId(memberId) : null;
 
-  // Get all members of this kitchen
-  const memberIds = await User.find({ kitchenId: kitchenObjectId })
+  // Get all non-banned members of this kitchen. Banned members' recipes must
+  // be filtered out: the existing recipe model has `isHidden` which admins use
+  // to hide individual content, but a banned-author filter needs to happen at
+  // the author layer.
+  const activeMembers = await User.find({
+    kitchenId: kitchenObjectId,
+    isBanned: { $ne: true },
+  })
     .select("_id")
-    .lean()
-    .then((users) => users.map((u) => u._id));
+    .lean();
+  const memberIds = activeMembers.map((u) => u._id);
 
   if (
     memberObjectId &&

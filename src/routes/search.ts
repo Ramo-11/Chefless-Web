@@ -7,6 +7,7 @@ import User from "../models/User";
 import Recipe from "../models/Recipe";
 import Kitchen from "../models/Kitchen";
 import Follow from "../models/Follow";
+import { getBlockedUserIds } from "../services/block-service";
 import { computeSpatulaBadge } from "../services/user-service";
 
 const router = Router();
@@ -96,6 +97,17 @@ interface KitchenSearchResult {
 // ── Visibility ──────────────────────────────────────────────────────────────
 
 /**
+ * Returns the bidirectional block exclusion set for the viewer. The
+ * block-service helper already unions "users I blocked" with "users who
+ * blocked me", so a single call suffices.
+ */
+async function getBlockExclusionIds(
+  viewerId: Types.ObjectId
+): Promise<Types.ObjectId[]> {
+  return getBlockedUserIds(viewerId.toString());
+}
+
+/**
  * Returns the accessible private author IDs (follows + kitchen members)
  * for the viewer. Does NOT load all public/banned user IDs into memory.
  */
@@ -173,7 +185,8 @@ async function searchRecipes(
   query: string,
   viewerId: Types.ObjectId,
   page: number,
-  limit: number
+  limit: number,
+  blockExclusionIds: Types.ObjectId[]
 ): Promise<{ recipes: RecipeSearchResult[]; total: number }> {
   const terms = parseTerms(query);
   if (!terms.length) return { recipes: [], total: 0 };
@@ -181,8 +194,10 @@ async function searchRecipes(
   const escapedTerms = terms.map(escapeRegex);
   const fullQueryEscaped = escapeRegex(query.trim());
 
-  // Every term must match at least one searchable field
-  const termFilter = {
+  // Every term must match at least one searchable field. Blocked authors
+  // (either direction) are excluded here so nothing they wrote ever enters
+  // the aggregation pipeline.
+  const termFilter: Record<string, unknown> = {
     $and: escapedTerms.map((term) => ({
       $or: [
         { title: { $regex: term, $options: "i" } },
@@ -193,6 +208,9 @@ async function searchRecipes(
       ],
     })),
   };
+  if (blockExclusionIds.length > 0) {
+    termFilter.authorId = { $nin: blockExclusionIds };
+  }
 
   const accessiblePrivateIds = await buildAccessiblePrivateIds(viewerId);
 
@@ -331,7 +349,8 @@ async function searchUsers(
   query: string,
   viewerId: Types.ObjectId,
   page: number,
-  limit: number
+  limit: number,
+  blockExclusionIds: Types.ObjectId[]
 ): Promise<{ users: UserSearchResult[]; total: number }> {
   const terms = parseTerms(query);
   if (!terms.length) return { users: [], total: 0 };
@@ -346,12 +365,17 @@ async function searchUsers(
     })),
   };
 
+  const idExcluder: Record<string, unknown> =
+    blockExclusionIds.length > 0
+      ? { $nin: [viewerId, ...blockExclusionIds] }
+      : { $ne: viewerId };
+
   const pipeline = [
     {
       $match: {
         $and: [
           termFilter,
-          { _id: { $ne: viewerId } },
+          { _id: idExcluder },
           { isBanned: { $ne: true } },
         ],
       },
@@ -581,6 +605,11 @@ router.get(
     }
 
     const viewerId = currentUser._id;
+    // Load the block exclusion set once and share across the user + recipe
+    // searches. Kitchen search is not filtered by blocks because a kitchen is
+    // a group resource, not a single user — the block list gates profile and
+    // authored-content visibility.
+    const blockExclusionIds = await getBlockExclusionIds(viewerId);
 
     let recipes: RecipeSearchResult[] = [];
     let users: UserSearchResult[] = [];
@@ -593,8 +622,8 @@ router.get(
       // Fetch all types in parallel
       const [recipeResults, userResults, kitchenResults] =
         await Promise.all([
-          searchRecipes(q, viewerId, page, limit),
-          searchUsers(q, viewerId, page, limit),
+          searchRecipes(q, viewerId, page, limit, blockExclusionIds),
+          searchUsers(q, viewerId, page, limit, blockExclusionIds),
           searchKitchens(q, viewerId, page, limit),
         ]);
       recipes = recipeResults.recipes;
@@ -604,11 +633,23 @@ router.get(
       kitchens = kitchenResults.kitchens;
       kitchensTotal = kitchenResults.total;
     } else if (type === "recipes") {
-      const recipeResults = await searchRecipes(q, viewerId, page, limit);
+      const recipeResults = await searchRecipes(
+        q,
+        viewerId,
+        page,
+        limit,
+        blockExclusionIds
+      );
       recipes = recipeResults.recipes;
       recipesTotal = recipeResults.total;
     } else if (type === "users") {
-      const userResults = await searchUsers(q, viewerId, page, limit);
+      const userResults = await searchUsers(
+        q,
+        viewerId,
+        page,
+        limit,
+        blockExclusionIds
+      );
       users = userResults.users;
       usersTotal = userResults.total;
     } else {

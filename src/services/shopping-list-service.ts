@@ -678,10 +678,18 @@ interface CombinedIngredient {
   category: string;
 }
 
+export interface GeneratedShoppingList {
+  list: IShoppingList;
+  meta: {
+    /** Number of scheduled recipes that were omitted because they weren't viewable by the whole kitchen. */
+    skippedPrivateCount: number;
+  };
+}
+
 export async function generateFromSchedule(
   userId: string,
   data: GenerateData
-): Promise<IShoppingList> {
+): Promise<GeneratedShoppingList> {
   const user = await getUserWithKitchen(userId);
 
   let kitchenId: Types.ObjectId;
@@ -719,13 +727,37 @@ export async function generateFromSchedule(
     ...new Set(entries.map((e) => e.recipeId!.toString())),
   ].map((id) => new Types.ObjectId(id));
 
-  // 3. Fetch all recipes with their ingredients
+  // 3. Fetch recipes + their authors. Only include recipes visible to every
+  //    kitchen member — i.e. public, non-private, non-hidden, non-banned-author.
+  //    Members may have scheduled private recipes of their own; those are
+  //    silently skipped (see skippedPrivateCount in the response meta).
   const recipes = await Recipe.find({ _id: { $in: recipeIds } })
-    .select("_id ingredients")
+    .select("_id ingredients authorId isPrivate isHidden")
     .lean();
 
+  const authorIds = [
+    ...new Set(recipes.map((r) => r.authorId.toString())),
+  ].map((id) => new Types.ObjectId(id));
+  const authors = await User.find({ _id: { $in: authorIds } })
+    .select("_id isPublic isBanned")
+    .lean();
+  const authorMap = new Map(authors.map((a) => [a._id.toString(), a]));
+
+  const viewableRecipes = recipes.filter((r) => {
+    if (r.isPrivate) return false;
+    if (r.isHidden) return false;
+    const author = authorMap.get(r.authorId.toString());
+    if (!author) return false;
+    if (author.isBanned) return false;
+    if (!author.isPublic) return false;
+    return true;
+  });
+
+  // Recipes we pulled in from the schedule but excluded on visibility grounds
+  const skippedPrivateCount = recipes.length - viewableRecipes.length;
+
   const recipeMap = new Map(
-    recipes.map((r) => [r._id.toString(), r])
+    viewableRecipes.map((r) => [r._id.toString(), r])
   );
 
   // 4. Count how many times each recipe appears in the schedule
@@ -792,5 +824,5 @@ export async function generateFromSchedule(
     scheduleEndDate: data.endDate,
   });
 
-  return list;
+  return { list, meta: { skippedPrivateCount } };
 }

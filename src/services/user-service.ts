@@ -3,11 +3,17 @@ import User, { IUser } from "../models/User";
 import Follow, { IFollow } from "../models/Follow";
 import Recipe from "../models/Recipe";
 import Like from "../models/Like";
+import SavedRecipe from "../models/SavedRecipe";
 import RecipeShare from "../models/RecipeShare";
 import Notification from "../models/Notification";
 import ShoppingList from "../models/ShoppingList";
 import ScheduleEntry from "../models/ScheduleEntry";
 import Kitchen from "../models/Kitchen";
+import Cookbook from "../models/Cookbook";
+import KitchenInvite from "../models/KitchenInvite";
+import Report from "../models/Report";
+import Block from "../models/Block";
+import { PromoRedemption } from "../models/PromoCode";
 import admin from "firebase-admin";
 import { canViewProfile } from "./visibility-service";
 import {
@@ -128,6 +134,11 @@ export async function updateProfile(
   return user;
 }
 
+/**
+ * Delete the user and cascade-remove every document that references them.
+ * Runs steps serially (not in a transaction) — if it fails midway the caller
+ * may retry and the remaining orphaned rows will be cleaned up.
+ */
 export async function deleteAccount(userId: string): Promise<void> {
   const objectId = new Types.ObjectId(userId);
 
@@ -135,7 +146,7 @@ export async function deleteAccount(userId: string): Promise<void> {
   const user = await User.findById(userId).select("firebaseUid kitchenId").lean();
   if (!user) return;
 
-  // Get the user to determine counter adjustments
+  // Follow counter adjustments — collect both directions first
   const [followsAsFollower, followsAsFollowing] = await Promise.all([
     Follow.find({ followerId: objectId, status: "active" }).lean(),
     Follow.find({ followingId: objectId, status: "active" }).lean(),
@@ -159,34 +170,77 @@ export async function deleteAccount(userId: string): Promise<void> {
     );
   }
 
-  // Delete all follow relationships involving this user
+  // Delete every follow record involving this user (both directions, any status)
   await Follow.deleteMany({
     $or: [{ followerId: objectId }, { followingId: objectId }],
   });
 
-  // Delete all recipes (and their associated likes/shares)
+  // Decrement likesCount on recipes this user liked, then drop their Like rows
+  const myLikes = await Like.find({ userId: objectId }).select("recipeId").lean();
+  if (myLikes.length > 0) {
+    // Count likes per recipe so we do one $inc per recipe (handles dup rows defensively)
+    const counts = new Map<string, number>();
+    for (const l of myLikes) {
+      const key = l.recipeId.toString();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    await Recipe.bulkWrite(
+      Array.from(counts.entries()).map(([rid, n]) => ({
+        updateOne: {
+          filter: { _id: new Types.ObjectId(rid) },
+          update: { $inc: { likesCount: -n } },
+        },
+      }))
+    );
+    await Like.deleteMany({ userId: objectId });
+  }
+
+  // Drop the user's saved-recipe rows (no denormalised counter to adjust)
+  await SavedRecipe.deleteMany({ userId: objectId });
+
+  // Delete all recipes authored by this user (plus their likes/saves/shares)
   const userRecipes = await Recipe.find({ authorId: objectId }).select("_id").lean();
   if (userRecipes.length > 0) {
     const recipeIds = userRecipes.map((r) => r._id);
     await Promise.all([
       Like.deleteMany({ recipeId: { $in: recipeIds } }),
+      SavedRecipe.deleteMany({ recipeId: { $in: recipeIds } }),
       RecipeShare.deleteMany({ recipeId: { $in: recipeIds } }),
-      // Preserve fork chain: null out authorId but keep authorName for display
+      // Preserve fork chain display: null out the link but keep the attribution name
       Recipe.updateMany(
         { "forkedFrom.recipeId": { $in: recipeIds } },
-        { $set: { "forkedFrom.authorId": null } }
+        { $set: { "forkedFrom.recipeId": null, "forkedFrom.authorId": null } }
       ),
     ]);
     await Recipe.deleteMany({ authorId: objectId });
   }
 
-  // Also null out authorId on forks of recipes by OTHER users that reference this user as fork author
+  // Forks whose authorId points at this user but whose origin recipe belongs to someone else
   await Recipe.updateMany(
     { "forkedFrom.authorId": objectId },
     { $set: { "forkedFrom.authorId": null } }
   );
 
-  // Remove user from their kitchen
+  // Delete cookbooks owned by this user (cookbooks contain recipe references only, no denorm counters)
+  await Cookbook.deleteMany({ ownerId: objectId });
+
+  // Kitchen invites the user was part of (either side)
+  await KitchenInvite.deleteMany({
+    $or: [{ senderId: objectId }, { recipientId: objectId }],
+  });
+
+  // Content-moderation rows filed by the user (target rows remain — history preserved against deleted content)
+  await Report.deleteMany({ reporterId: objectId });
+
+  // Every block row the user was on either side of
+  await Block.deleteMany({
+    $or: [{ blockerId: objectId }, { blockedId: objectId }],
+  });
+
+  // Redemption history is no longer meaningful once the user is gone
+  await PromoRedemption.deleteMany({ userId: objectId });
+
+  // Remove user from their kitchen member/permission arrays (lead transfer handled elsewhere)
   if (user.kitchenId) {
     await Kitchen.updateOne(
       { _id: user.kitchenId },
@@ -200,11 +254,13 @@ export async function deleteAccount(userId: string): Promise<void> {
     );
   }
 
-  // Delete notifications, shopping list entries, and schedule entries
+  // Notifications / shopping lists / schedule entries / recipe shares tied to this user
   await Promise.all([
     Notification.deleteMany({ userId: objectId }),
     ShoppingList.deleteMany({ userId: objectId }),
-    ScheduleEntry.deleteMany({ suggestedBy: objectId }),
+    ScheduleEntry.deleteMany({
+      $or: [{ userId: objectId }, { suggestedBy: objectId }],
+    }),
     RecipeShare.deleteMany({ $or: [{ senderId: objectId }, { recipientId: objectId }] }),
   ]);
 

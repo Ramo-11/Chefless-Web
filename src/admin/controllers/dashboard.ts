@@ -3,6 +3,7 @@ import User from "../../models/User";
 import Recipe from "../../models/Recipe";
 import Kitchen from "../../models/Kitchen";
 import Report from "../../models/Report";
+import { logger } from "../../lib/logger";
 
 export async function dashboardPage(
   req: Request,
@@ -54,7 +55,7 @@ export async function dashboardPage(
       recentUsers,
     });
   } catch (error) {
-    console.error("Failed to load dashboard:", error);
+    logger.error({ err: error }, "Failed to load dashboard");
     res.status(500).send("Internal server error");
   }
 }

@@ -4,6 +4,7 @@ import User, { IUser } from "../models/User";
 import Follow from "../models/Follow";
 import Like from "../models/Like";
 import SeasonalTag from "../models/SeasonalTag";
+import { getBlockedUserIds } from "./block-service";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,8 @@ interface PaginatedFeed {
 
 /**
  * Returns IDs of users the viewer actively follows.
+ * Filters on `status: "active"` so pending follow requests on private accounts
+ * do NOT count — a pending requester is not yet a follower.
  */
 async function getFollowingIds(
   userId: Types.ObjectId
@@ -62,6 +65,17 @@ async function getFollowingIds(
     .select("followingId")
     .lean();
   return follows.map((f) => f.followingId);
+}
+
+/**
+ * Returns the bidirectional block exclusion set for the viewer. The
+ * block-service's `getBlockedUserIds` is already bidirectional, so a single
+ * call yields both "users I blocked" and "users who blocked me".
+ */
+async function getBlockExclusionIds(
+  viewerId: Types.ObjectId
+): Promise<Types.ObjectId[]> {
+  return getBlockedUserIds(viewerId.toString());
 }
 
 /**
@@ -198,7 +212,8 @@ async function enrichRecipes(
  */
 async function getFeaturedRecipeForViewer(
   userId: Types.ObjectId,
-  accessiblePrivateIds: Types.ObjectId[]
+  accessiblePrivateIds: Types.ObjectId[],
+  blockExclusionIds: Types.ObjectId[] = []
 ): Promise<FeedRecipe | null> {
   const featured = await Recipe.findOne({
     isFeatured: true,
@@ -212,6 +227,11 @@ async function getFeaturedRecipeForViewer(
 
   // Feeds always exclude the viewer's own recipes — keep parity here.
   if (featured.authorId.equals(userId)) return null;
+
+  // Exclude any recipe whose author is on either side of a block.
+  if (blockExclusionIds.some((id) => id.equals(featured.authorId))) {
+    return null;
+  }
 
   const author = await User.findById(featured.authorId)
     .select("isPublic isBanned")
@@ -273,8 +293,15 @@ export async function forYouFeed(
   page: number,
   limit: number
 ): Promise<PaginatedFeed> {
+  // Load block exclusion set once at the top — same set is applied to the
+  // base match AND the featured-recipe lookup.
+  const blockExclusionIds = await getBlockExclusionIds(userId);
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
-  const featuredPromise = getFeaturedRecipeForViewer(userId, accessiblePrivateIds);
+  const featuredPromise = getFeaturedRecipeForViewer(
+    userId,
+    accessiblePrivateIds,
+    blockExclusionIds
+  );
 
   // Fetch user preferences
   const currentUser = await User.findById(userId)
@@ -299,10 +326,13 @@ export async function forYouFeed(
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const skip = (page - 1) * limit;
 
-  const baseMatch = {
+  const baseMatch: Record<string, unknown> = {
     isPrivate: false,
     isHidden: { $ne: true },
-    authorId: { $ne: userId },
+    authorId:
+      blockExclusionIds.length > 0
+        ? { $ne: userId, $nin: blockExclusionIds }
+        : { $ne: userId },
     createdAt: { $gte: thirtyDaysAgo },
   };
 
@@ -524,14 +554,18 @@ export async function trendingFeed(
   page: number,
   limit: number
 ): Promise<PaginatedFeed> {
+  const blockExclusionIds = await getBlockExclusionIds(userId);
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const skip = (page - 1) * limit;
 
-  const baseMatch = {
+  const baseMatch: Record<string, unknown> = {
     isPrivate: false,
     isHidden: { $ne: true },
-    authorId: { $ne: userId },
+    authorId:
+      blockExclusionIds.length > 0
+        ? { $ne: userId, $nin: blockExclusionIds }
+        : { $ne: userId },
     createdAt: { $gte: sevenDaysAgo },
   };
 
@@ -547,7 +581,7 @@ export async function trendingFeed(
         },
       },
     ] as unknown as PipelineStage[]),
-    getFeaturedRecipeForViewer(userId, accessiblePrivateIds),
+    getFeaturedRecipeForViewer(userId, accessiblePrivateIds, blockExclusionIds),
   ]);
 
   const recipes = (result?.data ?? []) as LeanRecipe[];
@@ -578,12 +612,27 @@ export async function friendsFeed(
   page: number,
   limit: number
 ): Promise<PaginatedFeed> {
+  const blockExclusionIds = await getBlockExclusionIds(userId);
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
-  const featuredPromise = getFeaturedRecipeForViewer(userId, accessiblePrivateIds);
+  const featuredPromise = getFeaturedRecipeForViewer(
+    userId,
+    accessiblePrivateIds,
+    blockExclusionIds
+  );
+  // `getFollowingIds` already filters on status: "active" — pending follow
+  // requests do NOT populate this feed.
   const followingIds = await getFollowingIds(userId);
   const skip = (page - 1) * limit;
 
-  if (followingIds.length === 0) {
+  // Remove blocked (either direction) authors from the followed-author set.
+  const blockedKeys = new Set(
+    blockExclusionIds.map((id) => id.toString())
+  );
+  const visibleFollowing = followingIds.filter(
+    (id) => !blockedKeys.has(id.toString())
+  );
+
+  if (visibleFollowing.length === 0) {
     const featured = await featuredPromise;
     const { recipes, total } = applyFeaturedToPage([], 0, featured, page);
     return {
@@ -596,7 +645,7 @@ export async function friendsFeed(
   }
 
   const filter = {
-    authorId: { $in: followingIds },
+    authorId: { $in: visibleFollowing },
     isPrivate: false,
     isHidden: { $ne: true },
   };
@@ -640,6 +689,7 @@ export async function seasonalFeed(
   page: number,
   limit: number
 ): Promise<PaginatedFeed> {
+  const blockExclusionIds = await getBlockExclusionIds(userId);
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
   const skip = (page - 1) * limit;
 
@@ -656,7 +706,10 @@ export async function seasonalFeed(
   const baseMatch: Record<string, unknown> = {
     isPrivate: false,
     isHidden: { $ne: true },
-    authorId: { $ne: userId },
+    authorId:
+      blockExclusionIds.length > 0
+        ? { $ne: userId, $nin: blockExclusionIds }
+        : { $ne: userId },
   };
 
   if (activeTags.length > 0) {
@@ -680,7 +733,7 @@ export async function seasonalFeed(
         },
       },
     ] as unknown as PipelineStage[]),
-    getFeaturedRecipeForViewer(userId, accessiblePrivateIds),
+    getFeaturedRecipeForViewer(userId, accessiblePrivateIds, blockExclusionIds),
   ]);
 
   const recipes = (result?.data ?? []) as LeanRecipe[];

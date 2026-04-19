@@ -14,8 +14,9 @@ export interface IStep {
 }
 
 export interface IForkedFrom {
-  recipeId: Types.ObjectId;
-  authorId: Types.ObjectId;
+  /** Nulled out when the origin recipe is deleted; authorName is preserved for attribution. */
+  recipeId: Types.ObjectId | null;
+  authorId: Types.ObjectId | null;
   authorName: string;
 }
 
@@ -76,15 +77,16 @@ const stepSchema = new Schema<IStep>(
 
 const forkedFromSchema = new Schema<IForkedFrom>(
   {
+    // Nullable: when the origin recipe is deleted we clear the ids but keep the attribution name.
     recipeId: {
       type: Schema.Types.ObjectId,
       ref: "Recipe",
-      required: true,
+      default: null,
     },
     authorId: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      default: null,
     },
     authorName: { type: String, required: true },
   },

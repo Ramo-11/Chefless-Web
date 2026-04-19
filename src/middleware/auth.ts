@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import admin from "firebase-admin";
 import User from "../models/User";
+import { logger } from "../lib/logger";
 
 // Initialize Firebase Admin only once.
 // Service account credentials are required for FCM push delivery.
@@ -9,7 +10,7 @@ import User from "../models/User";
 if (!admin.apps.length) {
   const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (!serviceAccountKey) {
-    console.warn(
+    logger.warn(
       "Firebase Admin initialized without FIREBASE_SERVICE_ACCOUNT_KEY. " +
         "Auth verification may still work, but FCM push notifications are disabled."
     );

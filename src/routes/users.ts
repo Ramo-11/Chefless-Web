@@ -43,16 +43,20 @@ const objectIdParam = z.object({
 
 // --- Schemas ---
 
-const updateProfileSchema = z.object({
-  fullName: z.string().min(1).max(100).optional(),
-  bio: z.string().max(150).nullable().optional(),
-  phone: z.string().max(20).nullable().optional(),
-  isPublic: z.boolean().optional(),
-  dietaryPreferences: z.array(z.string().max(50)).max(20).optional(),
-  cuisinePreferences: z.array(z.string().max(50)).max(20).optional(),
-  profilePicture: z.string().url().nullable().optional(),
-  onboardingComplete: z.boolean().optional(),
-});
+// strict() rejects unknown fields with a validation error — protects us from
+// clients attempting to set fields the server doesn't expose (e.g. isPremium).
+const updateProfileSchema = z
+  .object({
+    fullName: z.string().min(1).max(100).optional(),
+    bio: z.string().max(150).nullable().optional(),
+    phone: z.string().max(20).nullable().optional(),
+    isPublic: z.boolean().optional(),
+    dietaryPreferences: z.array(z.string().max(50)).max(20).optional(),
+    cuisinePreferences: z.array(z.string().max(50)).max(20).optional(),
+    profilePicture: z.string().url().nullable().optional(),
+    onboardingComplete: z.boolean().optional(),
+  })
+  .strict();
 
 const searchQuerySchema = z.object({
   q: z.string().min(1, "Search query is required").max(100),
@@ -417,11 +421,25 @@ router.get(
     }
 
     const skip = (page - 1) * limit;
-    const query = {
+    // Build the Mongo query explicitly — relying on `undefined` values to be
+    // stripped is brittle and broke at least once when Mongoose kept them.
+    const query: Record<string, unknown> = {
       authorId: targetUser._id,
-      isPrivate: isSelf ? undefined : false,
       isHidden: { $ne: true },
     };
+    if (!isSelf) query.isPrivate = false;
+
+    // Hide recipes by users involved in a block relationship with the viewer.
+    // Import lazily to keep this route file from pulling in unused services.
+    const { getBlockedUserIds } = await import(
+      "../services/block-service"
+    );
+    const blockedIds = await getBlockedUserIds(currentUser._id.toString());
+    if (blockedIds.some((id) => id.equals(targetUser._id))) {
+      // Any block either direction hides the whole profile listing
+      res.status(200).json({ data: [], page, limit, total: 0, totalPages: 0 });
+      return;
+    }
 
     const [recipes, total] = await Promise.all([
       Recipe.find(query)

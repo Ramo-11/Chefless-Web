@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import AdminUser from "../../models/AdminUser";
 import AuditLog from "../../models/AuditLog";
+import { logger } from "../../lib/logger";
 
 async function audit(
   req: Request,
@@ -18,7 +19,7 @@ async function audit(
     details,
     ipAddress: req.ip,
   }).catch((err: unknown) => {
-    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+    logger.error({ err }, "Audit log failed");
   });
 }
 
@@ -35,7 +36,7 @@ export async function adminsPage(req: Request, res: Response): Promise<void> {
       admins,
     });
   } catch (error) {
-    console.error("Failed to load admins page:", error);
+    logger.error({ err: error }, "Failed to load admins page");
     res.status(500).send("Internal server error");
   }
 }
@@ -89,7 +90,7 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to create admin:", error);
+    logger.error({ err: error }, "Failed to create admin");
     res.status(500).json({ error: "Failed to create admin" });
   }
 }
@@ -133,7 +134,7 @@ export async function updateAdmin(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to update admin:", error);
+    logger.error({ err: error }, "Failed to update admin");
     res.status(500).json({ error: "Failed to update admin" });
   }
 }
@@ -165,7 +166,7 @@ export async function toggleAdminActive(
 
     res.json({ success: true, isActive: admin.isActive });
   } catch (error) {
-    console.error("Failed to toggle admin active:", error);
+    logger.error({ err: error }, "Failed to toggle admin active");
     res.status(500).json({ error: "Failed to toggle admin status" });
   }
 }
@@ -204,7 +205,7 @@ export async function resetAdminPassword(
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to reset admin password:", error);
+    logger.error({ err: error }, "Failed to reset admin password");
     res.status(500).json({ error: "Failed to reset password" });
   }
 }

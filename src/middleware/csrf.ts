@@ -16,6 +16,18 @@ export function generateCsrfToken(req: Request): string {
 }
 
 /**
+ * Rotates the CSRF token, discarding any previous value. Use this on
+ * privilege transitions (e.g. right after successful login) so a token that
+ * may have been observed pre-auth can never be reused against the new
+ * authenticated session.
+ */
+export function rotateCsrfToken(req: Request): string {
+  const fresh = randomBytes(32).toString("hex");
+  req.session[CSRF_SESSION_KEY] = fresh;
+  return fresh;
+}
+
+/**
  * Middleware that validates the CSRF token on state-changing requests.
  * Token can be submitted via form field `_csrf` or the `x-csrf-token` header.
  */

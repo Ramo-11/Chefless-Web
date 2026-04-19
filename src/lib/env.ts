@@ -1,7 +1,43 @@
 import "dotenv/config";
 import { z } from "zod";
 
+const nodeEnvSchema = z.enum(["development", "production", "test"]);
+
+/**
+ * ALLOWED_ORIGINS is a comma-separated list of origins that are permitted
+ * for browser CORS access. Each origin must be a valid absolute URL.
+ * Empty / unset in production is allowed by schema but is guarded at runtime
+ * in `index.ts` (browsers get `origin: false`).
+ */
+const allowedOriginsSchema = z
+  .string()
+  .optional()
+  .transform((val) => {
+    if (!val) return [] as string[];
+    return val
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o.length > 0);
+  })
+  .refine(
+    (origins) =>
+      origins.every((o) => {
+        try {
+          // eslint-disable-next-line no-new
+          new URL(o);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    {
+      message:
+        "ALLOWED_ORIGINS must be a comma-separated list of absolute URLs (e.g. https://app.example.com,https://admin.example.com)",
+    }
+  );
+
 const envSchema = z.object({
+  NODE_ENV: nodeEnvSchema.default("development"),
   PORT: z.coerce.number().default(3001),
   MONGODB_URI: z.string().min(1, "MONGODB_URI is required"),
   CLOUDINARY_CLOUD_NAME: z.string().min(1, "CLOUDINARY_CLOUD_NAME is required"),
@@ -9,13 +45,19 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().min(1, "CLOUDINARY_API_SECRET is required"),
   FIREBASE_PROJECT_ID: z.string().min(1, "FIREBASE_PROJECT_ID is required"),
   FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
-  REVENUECAT_WEBHOOK_SECRET: z.string().min(1, "REVENUECAT_WEBHOOK_SECRET is required"),
-  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
+  REVENUECAT_WEBHOOK_SECRET: z
+    .string()
+    .min(1, "REVENUECAT_WEBHOOK_SECRET is required"),
+  SESSION_SECRET: z
+    .string()
+    .min(32, "SESSION_SECRET must be at least 32 characters"),
   /** Optional — AI Recipe Helper returns 503 when unset */
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** Optional — comma-separated list of browser origins permitted via CORS */
+  ALLOWED_ORIGINS: allowedOriginsSchema,
 });
 
-type Env = z.infer<typeof envSchema>;
+export type Env = z.infer<typeof envSchema>;
 
 function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
@@ -24,11 +66,25 @@ function validateEnv(): Env {
     const formatted = result.error.issues
       .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
       .join("\n");
+    // eslint-disable-next-line no-console
     console.error(`Environment validation failed:\n${formatted}`);
     process.exit(1);
   }
 
-  return result.data;
+  const parsed = result.data;
+
+  // Production safety: if browser access is expected but no origins are
+  // configured, surface a loud warning. The runtime in index.ts will still
+  // refuse browser requests — this makes the misconfiguration discoverable.
+  if (parsed.NODE_ENV === "production" && parsed.ALLOWED_ORIGINS.length === 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[env] ALLOWED_ORIGINS is empty in production — browser CORS will be refused. " +
+        "Set ALLOWED_ORIGINS to a comma-separated list of absolute URLs to allow web clients."
+    );
+  }
+
+  return parsed;
 }
 
 export const env: Env = validateEnv();

@@ -133,14 +133,14 @@ router.post(
     if (!userId) return;
 
     const data = req.body as z.infer<typeof generateSchema>;
-    const list = await generateFromSchedule(userId, {
+    const { list, meta } = await generateFromSchedule(userId, {
       kitchenId: data.kitchenId,
       startDate: data.startDate,
       endDate: data.endDate,
       name: data.name,
     });
 
-    res.status(201).json({ list });
+    res.status(201).json({ list, meta });
   })
 );
 

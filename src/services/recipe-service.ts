@@ -13,6 +13,7 @@ import {
   notifyRecipeShared,
 } from "./notification-service";
 import { hasActivePremium } from "../lib/premium";
+import { getBlockedUserIds } from "./block-service";
 
 const FREE_TIER_RECIPE_LIMIT = 10;
 
@@ -114,57 +115,124 @@ const CONTENT_FIELDS: ReadonlyArray<keyof UpdateRecipeData> = [
 
 // --- Service Functions ---
 
-export async function createRecipe(
+/**
+ * Reserve a recipe-counter slot atomically before inserting the Recipe doc.
+ * For free-tier non-remix creates the conditional `findOneAndUpdate` fails
+ * when the user already has 10 originals — this prevents the classic
+ * read-then-write race where two simultaneous creates both pass the check.
+ * Caller MUST roll the counter back if the subsequent insert fails.
+ */
+async function reserveRecipeQuota(
   authorId: string,
-  data: CreateRecipeData
-): Promise<IRecipe> {
+  isRemix: boolean
+): Promise<void> {
+  const authorOid = new Types.ObjectId(authorId);
+  if (isRemix) {
+    // Remixes don't count toward the free-tier cap; bump only total recipes count
+    const res = await User.updateOne(
+      { _id: authorOid },
+      { $inc: { recipesCount: 1 } }
+    );
+    if (res.matchedCount === 0) {
+      throw createError("User not found", 404);
+    }
+    return;
+  }
+
+  // Non-remix: originalRecipesCount must also increment. Premium users have no cap;
+  // free users are gated by the conditional update (acts as atomic CAS).
   const author = await User.findById(authorId)
-    .select("isPremium premiumExpiresAt originalRecipesCount")
+    .select("isPremium premiumExpiresAt")
     .lean();
   if (!author) {
     throw createError("User not found", 404);
   }
 
-  const originals = author.originalRecipesCount ?? 0;
-  if (!hasActivePremium(author) && originals >= FREE_TIER_RECIPE_LIMIT) {
+  if (hasActivePremium(author)) {
+    await User.updateOne(
+      { _id: authorOid },
+      { $inc: { recipesCount: 1, originalRecipesCount: 1 } }
+    );
+    return;
+  }
+
+  const updated = await User.findOneAndUpdate(
+    {
+      _id: authorOid,
+      isPremium: false,
+      originalRecipesCount: { $lt: FREE_TIER_RECIPE_LIMIT },
+    },
+    { $inc: { recipesCount: 1, originalRecipesCount: 1 } },
+    { new: true }
+  );
+  if (!updated) {
     throw createError(
-      `Free tier is limited to ${FREE_TIER_RECIPE_LIMIT} original recipes. Remixes do not count toward this limit. Upgrade to premium for unlimited recipes.`,
+      `Free tier cap reached — limited to ${FREE_TIER_RECIPE_LIMIT} original recipes. Remixes do not count toward this limit. Upgrade to premium for unlimited recipes.`,
       403
     );
   }
+}
+
+/**
+ * Compensating transaction — if the Recipe insert fails after we've already
+ * reserved a quota slot, roll it back so the user's counter doesn't drift up.
+ */
+async function releaseRecipeQuota(
+  authorId: string,
+  isRemix: boolean
+): Promise<void> {
+  const authorOid = new Types.ObjectId(authorId);
+  if (isRemix) {
+    await User.updateOne(
+      { _id: authorOid },
+      { $inc: { recipesCount: -1 } }
+    );
+  } else {
+    await User.updateOne(
+      { _id: authorOid },
+      { $inc: { recipesCount: -1, originalRecipesCount: -1 } }
+    );
+  }
+}
+
+export async function createRecipe(
+  authorId: string,
+  data: CreateRecipeData
+): Promise<IRecipe> {
+  // Reserve the quota slot atomically before touching the recipe collection
+  await reserveRecipeQuota(authorId, false);
 
   const totalTime = computeTotalTime(data.prepTime, data.cookTime);
 
-  const recipe = await Recipe.create({
-    authorId: new Types.ObjectId(authorId),
-    title: data.title,
-    description: data.description,
-    story: data.story,
-    photos: data.photos ?? [],
-    showSignature: data.showSignature ?? false,
-    labels: data.labels ?? [],
-    dietaryTags: data.dietaryTags ?? [],
-    cuisineTags: data.cuisineTags ?? [],
-    tags: data.tags ?? [],
-    difficulty: data.difficulty,
-    ingredients: data.ingredients ?? [],
-    steps: data.steps ?? [],
-    prepTime: data.prepTime,
-    cookTime: data.cookTime,
-    totalTime,
-    servings: data.servings,
-    calories: data.calories,
-    costEstimate: data.costEstimate,
-    baseServings: data.baseServings ?? 1,
-    isPrivate: data.isPrivate ?? false,
-  });
-
-  await User.updateOne(
-    { _id: authorId },
-    { $inc: { recipesCount: 1, originalRecipesCount: 1 } }
-  );
-
-  return recipe;
+  try {
+    const recipe = await Recipe.create({
+      authorId: new Types.ObjectId(authorId),
+      title: data.title,
+      description: data.description,
+      story: data.story,
+      photos: data.photos ?? [],
+      showSignature: data.showSignature ?? false,
+      labels: data.labels ?? [],
+      dietaryTags: data.dietaryTags ?? [],
+      cuisineTags: data.cuisineTags ?? [],
+      tags: data.tags ?? [],
+      difficulty: data.difficulty,
+      ingredients: data.ingredients ?? [],
+      steps: data.steps ?? [],
+      prepTime: data.prepTime,
+      cookTime: data.cookTime,
+      totalTime,
+      servings: data.servings,
+      calories: data.calories,
+      costEstimate: data.costEstimate,
+      baseServings: data.baseServings ?? 1,
+      isPrivate: data.isPrivate ?? false,
+    });
+    return recipe;
+  } catch (err) {
+    await releaseRecipeQuota(authorId, false);
+    throw err;
+  }
 }
 
 export async function getRecipe(
@@ -182,9 +250,9 @@ export async function getRecipe(
   // Fan out everything that depends on `recipe` in a single round-trip.
   // Previously we awaited author → fork-author → like/save sequentially,
   // adding ~3× the latency. Now they all run in parallel.
-  const [author, forkAuthor, liked, saved] = await Promise.all([
+  const [author, forkAuthor, liked, saved, requester] = await Promise.all([
     User.findById(recipe.authorId)
-      .select("fullName profilePicture signature isPublic kitchenId")
+      .select("fullName profilePicture signature isPublic kitchenId isBanned")
       .lean(),
     forkedFrom?.authorId
       ? User.findById(forkedFrom.authorId).select("fullName").lean()
@@ -195,10 +263,27 @@ export async function getRecipe(
     viewerId
       ? SavedRecipe.exists({ userId: viewerId, recipeId: recipe._id })
       : Promise.resolve(null),
+    viewerId
+      ? User.findById(viewerId).select("isAdmin").lean()
+      : Promise.resolve(null),
   ]);
 
   if (!author) {
     throw createError("Recipe author not found", 404);
+  }
+
+  const isOwner = viewerId ? recipe.authorId.equals(viewerId) : false;
+  const isAdmin = requester?.isAdmin === true;
+
+  // Hidden recipes are invisible to everyone except the owner and admins.
+  // We 404 (not 403) so the route doesn't reveal the existence of removed content.
+  if (recipe.isHidden && !isOwner && !isAdmin) {
+    throw createError("Recipe not found", 404);
+  }
+
+  // Banned authors — treat their non-owner-viewed recipes as unavailable
+  if (author.isBanned && !isOwner && !isAdmin) {
+    throw createError("Recipe not found", 404);
   }
 
   const canView = await canViewRecipe(
@@ -313,22 +398,23 @@ export async function deleteRecipe(
   }
 
   // If this recipe was forked from another, decrement the original's forksCount
-  if (recipe.forkedFrom) {
+  if (recipe.forkedFrom?.recipeId) {
     await Recipe.updateOne(
       { _id: recipe.forkedFrom.recipeId },
       { $inc: { forksCount: -1 } }
     );
   }
 
-  // Delete all likes, saves, and shares associated with this recipe
-  // Also clear forkedFrom on any recipes that were forked from this one
+  // Delete all likes, saves, and shares associated with this recipe.
+  // Preserve remix attribution: null out the recipeId/authorId pointers on
+  // child forks but keep the authorName so future readers still see "Remix of …".
   await Promise.all([
     Like.deleteMany({ recipeId: recipe._id }),
     SavedRecipe.deleteMany({ recipeId: recipe._id }),
     RecipeShare.deleteMany({ recipeId: recipe._id }),
     Recipe.updateMany(
       { "forkedFrom.recipeId": recipe._id },
-      { $unset: { forkedFrom: 1 } }
+      { $set: { "forkedFrom.recipeId": null, "forkedFrom.authorId": null } }
     ),
   ]);
 
@@ -353,6 +439,7 @@ export async function listMyRecipes(
   filters: RecipeFilters
 ): Promise<PaginatedRecipes> {
   const skip = (page - 1) * limit;
+  // Owner sees their own hidden recipes — we're not filtering them out here.
   const query: FilterQuery<IRecipe> = { authorId: new Types.ObjectId(userId) };
 
   if (filters.label) {
@@ -415,10 +502,15 @@ export async function forkRecipe(
     throw createError("You cannot remix your own recipe", 400);
   }
 
+  // Block hidden recipes (moderated) from being forked — spreads the issue
+  if (originalRecipe.isHidden) {
+    throw createError("Recipe not found", 404);
+  }
+
   // Visibility check + duplicate-fork check in parallel.
   const [author, existingFork] = await Promise.all([
     User.findById(originalRecipe.authorId)
-      .select("fullName isPublic kitchenId")
+      .select("fullName isPublic kitchenId isBanned")
       .lean(),
     Recipe.findOne({
       authorId: new Types.ObjectId(userId),
@@ -430,6 +522,11 @@ export async function forkRecipe(
 
   if (!author) {
     throw createError("Recipe author not found", 404);
+  }
+
+  // Banned author — don't let anyone amplify their content
+  if (author.isBanned) {
+    throw createError("Recipe not found", 404);
   }
 
   const canView = await canViewRecipe(
@@ -445,48 +542,52 @@ export async function forkRecipe(
     throw createError("You have already remixed this recipe", 400);
   }
 
+  // Reserve a remix quota slot before inserting the recipe so the counter can
+  // be rolled back if Recipe.create throws (e.g. validation failure).
+  await reserveRecipeQuota(userId, true);
+
   const totalTime = computeTotalTime(originalRecipe.prepTime, originalRecipe.cookTime);
 
-  const forkedRecipe = await Recipe.create({
-    authorId: new Types.ObjectId(userId),
-    title: originalRecipe.title,
-    description: originalRecipe.description,
-    story: originalRecipe.story,
-    photos: originalRecipe.photos,
-    showSignature: false,
-    labels: originalRecipe.labels,
-    dietaryTags: originalRecipe.dietaryTags,
-    cuisineTags: originalRecipe.cuisineTags,
-    difficulty: originalRecipe.difficulty,
-    ingredients: originalRecipe.ingredients,
-    steps: originalRecipe.steps,
-    prepTime: originalRecipe.prepTime,
-    cookTime: originalRecipe.cookTime,
-    totalTime,
-    servings: originalRecipe.servings,
-    calories: originalRecipe.calories,
-    costEstimate: originalRecipe.costEstimate,
-    baseServings: originalRecipe.baseServings,
-    forkedFrom: {
-      recipeId: originalRecipe._id,
-      authorId: originalRecipe.authorId,
-      authorName: author.fullName,
-    },
-    isModifiedFork: false,
-    isPrivate: false,
-  });
+  let forkedRecipe: IRecipe;
+  try {
+    forkedRecipe = await Recipe.create({
+      authorId: new Types.ObjectId(userId),
+      title: originalRecipe.title,
+      description: originalRecipe.description,
+      story: originalRecipe.story,
+      photos: originalRecipe.photos,
+      showSignature: false,
+      labels: originalRecipe.labels,
+      dietaryTags: originalRecipe.dietaryTags,
+      cuisineTags: originalRecipe.cuisineTags,
+      difficulty: originalRecipe.difficulty,
+      ingredients: originalRecipe.ingredients,
+      steps: originalRecipe.steps,
+      prepTime: originalRecipe.prepTime,
+      cookTime: originalRecipe.cookTime,
+      totalTime,
+      servings: originalRecipe.servings,
+      calories: originalRecipe.calories,
+      costEstimate: originalRecipe.costEstimate,
+      baseServings: originalRecipe.baseServings,
+      forkedFrom: {
+        recipeId: originalRecipe._id,
+        authorId: originalRecipe.authorId,
+        authorName: author.fullName,
+      },
+      isModifiedFork: false,
+      isPrivate: false,
+    });
+  } catch (err) {
+    await releaseRecipeQuota(userId, true);
+    throw err;
+  }
 
-  // Increment forksCount on original recipe and user's recipe count atomically
-  await Promise.all([
-    Recipe.updateOne(
-      { _id: originalRecipe._id },
-      { $inc: { forksCount: 1 } }
-    ),
-    User.updateOne(
-      { _id: userId },
-      { $inc: { recipesCount: 1 } }
-    ),
-  ]);
+  // Increment forksCount on the original
+  await Recipe.updateOne(
+    { _id: originalRecipe._id },
+    { $inc: { forksCount: 1 } }
+  );
 
   // Fire-and-forget notification
   notifyRecipeForked(userId, recipeId).catch((err: unknown) => {
@@ -501,21 +602,6 @@ export async function duplicateRecipe(
   recipeId: string,
   userId: string
 ): Promise<IRecipe> {
-  const user = await User.findById(userId)
-    .select("isPremium premiumExpiresAt originalRecipesCount")
-    .lean();
-  if (!user) {
-    throw createError("User not found", 404);
-  }
-
-  const originals = user.originalRecipesCount ?? 0;
-  if (!hasActivePremium(user) && originals >= FREE_TIER_RECIPE_LIMIT) {
-    throw createError(
-      `Free tier is limited to ${FREE_TIER_RECIPE_LIMIT} original recipes. Upgrade to premium for unlimited recipes.`,
-      403
-    );
-  }
-
   const originalRecipe = await Recipe.findById(recipeId);
   if (!originalRecipe) {
     throw createError("Recipe not found", 404);
@@ -526,40 +612,43 @@ export async function duplicateRecipe(
     throw createError("You can only duplicate your own recipes", 403);
   }
 
+  // Duplicates count as originals (the user is creating new content under their authorship).
+  // Route through the same atomic quota reservation used by createRecipe.
+  await reserveRecipeQuota(userId, false);
+
   const totalTime = computeTotalTime(
     originalRecipe.prepTime,
     originalRecipe.cookTime
   );
 
-  const duplicated = await Recipe.create({
-    authorId: new Types.ObjectId(userId),
-    title: `${originalRecipe.title} (Copy)`,
-    description: originalRecipe.description,
-    story: originalRecipe.story,
-    photos: originalRecipe.photos,
-    showSignature: originalRecipe.showSignature,
-    labels: originalRecipe.labels,
-    dietaryTags: originalRecipe.dietaryTags,
-    cuisineTags: originalRecipe.cuisineTags,
-    difficulty: originalRecipe.difficulty,
-    ingredients: originalRecipe.ingredients,
-    steps: originalRecipe.steps,
-    prepTime: originalRecipe.prepTime,
-    cookTime: originalRecipe.cookTime,
-    totalTime,
-    servings: originalRecipe.servings,
-    calories: originalRecipe.calories,
-    costEstimate: originalRecipe.costEstimate,
-    baseServings: originalRecipe.baseServings,
-    isPrivate: originalRecipe.isPrivate,
-  });
-
-  await User.updateOne(
-    { _id: userId },
-    { $inc: { recipesCount: 1, originalRecipesCount: 1 } }
-  );
-
-  return duplicated;
+  try {
+    const duplicated = await Recipe.create({
+      authorId: new Types.ObjectId(userId),
+      title: `${originalRecipe.title} (Copy)`,
+      description: originalRecipe.description,
+      story: originalRecipe.story,
+      photos: originalRecipe.photos,
+      showSignature: originalRecipe.showSignature,
+      labels: originalRecipe.labels,
+      dietaryTags: originalRecipe.dietaryTags,
+      cuisineTags: originalRecipe.cuisineTags,
+      difficulty: originalRecipe.difficulty,
+      ingredients: originalRecipe.ingredients,
+      steps: originalRecipe.steps,
+      prepTime: originalRecipe.prepTime,
+      cookTime: originalRecipe.cookTime,
+      totalTime,
+      servings: originalRecipe.servings,
+      calories: originalRecipe.calories,
+      costEstimate: originalRecipe.costEstimate,
+      baseServings: originalRecipe.baseServings,
+      isPrivate: originalRecipe.isPrivate,
+    });
+    return duplicated;
+  } catch (err) {
+    await releaseRecipeQuota(userId, false);
+    throw err;
+  }
 }
 
 export async function likeRecipe(
@@ -645,17 +734,26 @@ export async function listLikedRecipes(
   const skip = (page - 1) * limit;
   const objectId = new Types.ObjectId(userId);
 
-  const [likes, total] = await Promise.all([
+  const [likes, total, blockedIds] = await Promise.all([
     Like.find({ userId: objectId })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     Like.countDocuments({ userId: objectId }),
+    getBlockedUserIds(userId),
   ]);
 
   const recipeIds = likes.map((like) => like.recipeId);
-  const recipes = await Recipe.find({ _id: { $in: recipeIds } }).lean<IRecipe[]>();
+  const recipeQuery: FilterQuery<IRecipe> = {
+    _id: { $in: recipeIds },
+    isHidden: { $ne: true },
+  };
+  // Hide recipes authored by blocked users (either direction)
+  if (blockedIds.length > 0) {
+    recipeQuery.authorId = { $nin: blockedIds };
+  }
+  const recipes = await Recipe.find(recipeQuery).lean<IRecipe[]>();
 
   // Maintain the order from likes (newest liked first)
   const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
@@ -741,17 +839,25 @@ export async function listSavedRecipes(
   const skip = (page - 1) * limit;
   const objectId = new Types.ObjectId(userId);
 
-  const [saved, total] = await Promise.all([
+  const [saved, total, blockedIds] = await Promise.all([
     SavedRecipe.find({ userId: objectId })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     SavedRecipe.countDocuments({ userId: objectId }),
+    getBlockedUserIds(userId),
   ]);
 
   const recipeIds = saved.map((s) => s.recipeId);
-  const recipes = await Recipe.find({ _id: { $in: recipeIds } }).lean<IRecipe[]>();
+  const recipeQuery: FilterQuery<IRecipe> = {
+    _id: { $in: recipeIds },
+    isHidden: { $ne: true },
+  };
+  if (blockedIds.length > 0) {
+    recipeQuery.authorId = { $nin: blockedIds };
+  }
+  const recipes = await Recipe.find(recipeQuery).lean<IRecipe[]>();
 
   const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
   const orderedRecipes = recipeIds

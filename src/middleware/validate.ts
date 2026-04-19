@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodSchema, ZodError } from "zod";
+import { logger } from "../lib/logger";
 
 interface ValidationTarget {
   body?: ZodSchema;
@@ -9,7 +10,10 @@ interface ValidationTarget {
 
 export function validate(schemas: ValidationTarget) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const errors: Array<{ location: string; issues: Array<{ path: string; message: string }> }> = [];
+    const errors: Array<{
+      location: string;
+      issues: Array<{ path: string; message: string }>;
+    }> = [];
 
     if (schemas.body) {
       const result = schemas.body.safeParse(req.body);
@@ -48,9 +52,18 @@ export function validate(schemas: ValidationTarget) {
     }
 
     if (errors.length > 0) {
-      console.log(
-        `[Validation] ${req.method} ${req.path}:`,
-        JSON.stringify(errors, null, 2)
+      // Never log the raw request body — it may contain PII, tokens, or
+      // passwords. Log only the path and the validation error keys so we can
+      // still diagnose client bugs without leaking user data.
+      logger.warn(
+        {
+          method: req.method,
+          path: req.path,
+          errorKeys: errors.flatMap((e) =>
+            e.issues.map((i) => `${e.location}.${i.path}`)
+          ),
+        },
+        "Request validation failed"
       );
       res.status(400).json({ error: "Validation failed", details: errors });
       return;
@@ -60,7 +73,9 @@ export function validate(schemas: ValidationTarget) {
   };
 }
 
-function formatZodError(error: ZodError): Array<{ path: string; message: string }> {
+function formatZodError(
+  error: ZodError
+): Array<{ path: string; message: string }> {
   return error.issues.map((issue) => ({
     path: issue.path.join("."),
     message: issue.message,

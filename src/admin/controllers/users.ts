@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import User from "../../models/User";
 import AuditLog from "../../models/AuditLog";
+import { logger } from "../../lib/logger";
 
 async function audit(
   req: Request,
@@ -18,7 +19,7 @@ async function audit(
     details,
     ipAddress: req.ip,
   }).catch((err: unknown) => {
-    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+    logger.error({ err }, "Audit log failed");
   });
 }
 
@@ -67,7 +68,7 @@ export async function usersPage(req: Request, res: Response): Promise<void> {
       filter,
     });
   } catch (error) {
-    console.error("Failed to load users page:", error);
+    logger.error({ err: error }, "Failed to load users page");
     res.status(500).send("Internal server error");
   }
 }
@@ -81,7 +82,7 @@ export async function userDetail(req: Request, res: Response): Promise<void> {
     }
     res.json({ user });
   } catch (error) {
-    console.error("Failed to get user detail:", error);
+    logger.error({ err: error }, "Failed to get user detail");
     res.status(500).json({ error: "Failed to load user" });
   }
 }
@@ -107,7 +108,7 @@ export async function banUser(req: Request, res: Response): Promise<void> {
     await audit(req, "ban_user", "user", req.params.id as string, { reason });
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to ban user:", error);
+    logger.error({ err: error }, "Failed to ban user");
     res.status(500).json({ error: "Failed to ban user" });
   }
 }
@@ -131,7 +132,7 @@ export async function unbanUser(req: Request, res: Response): Promise<void> {
     await audit(req, "unban_user", "user", req.params.id as string);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to unban user:", error);
+    logger.error({ err: error }, "Failed to unban user");
     res.status(500).json({ error: "Failed to unban user" });
   }
 }
@@ -170,7 +171,7 @@ export async function grantPremium(req: Request, res: Response): Promise<void> {
     });
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to grant premium:", error);
+    logger.error({ err: error }, "Failed to grant premium");
     res.status(500).json({ error: "Failed to grant premium" });
   }
 }
@@ -194,7 +195,7 @@ export async function revokePremium(req: Request, res: Response): Promise<void> 
     await audit(req, "revoke_premium", "user", req.params.id as string);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to revoke premium:", error);
+    logger.error({ err: error }, "Failed to revoke premium");
     res.status(500).json({ error: "Failed to revoke premium" });
   }
 }
@@ -235,7 +236,7 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
     await audit(req, "update_user", "user", req.params.id as string, sanitized);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to update user:", error);
+    logger.error({ err: error }, "Failed to update user");
     res.status(500).json({ error: "Failed to update user" });
   }
 }

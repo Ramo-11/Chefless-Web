@@ -5,6 +5,13 @@ export interface IKitchen extends Document {
   name: string;
   leadId: Types.ObjectId;
   inviteCode: string;
+  /**
+   * When the current `inviteCode` stops being accepted by `joinKitchen`.
+   * Undefined for kitchens created before the expiry feature shipped
+   * (grandfathered — treated as non-expiring). New kitchens and regenerated
+   * codes always get a concrete expiry.
+   */
+  inviteCodeExpiresAt?: Date;
   photo?: string;
   isPublic: boolean;
   membersWithScheduleEdit: Types.ObjectId[];
@@ -42,6 +49,9 @@ const kitchenSchema = new Schema<IKitchen>(
       required: true,
       unique: true,
       index: true,
+    },
+    inviteCodeExpiresAt: {
+      type: Date,
     },
     photo: { type: String },
     isPublic: {

@@ -2,6 +2,12 @@ import { Request, Response } from "express";
 import Recipe from "../../models/Recipe";
 import Report from "../../models/Report";
 import AuditLog from "../../models/AuditLog";
+import { logger } from "../../lib/logger";
+
+/** Escape user input for use inside a MongoDB `$regex` expression. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 async function audit(
   req: Request,
@@ -19,7 +25,7 @@ async function audit(
     details,
     ipAddress: req.ip,
   }).catch((err: unknown) => {
-    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+    logger.error({ err }, "Audit log failed");
   });
 }
 
@@ -36,7 +42,7 @@ export async function recipesPage(
     const query: Record<string, unknown> = {};
 
     if (search) {
-      query.title = { $regex: search, $options: "i" };
+      query.title = { $regex: escapeRegex(search), $options: "i" };
     }
 
     if (filter === "reported") query.reportsCount = { $gt: 0 };
@@ -68,7 +74,7 @@ export async function recipesPage(
       search,
     });
   } catch (error) {
-    console.error("Failed to load recipes page:", error);
+    logger.error({ err: error }, "Failed to load recipes page");
     res.status(500).send("Internal server error");
   }
 }
@@ -88,7 +94,7 @@ export async function toggleHideRecipe(
     await audit(req, recipe.isHidden ? "hide_recipe" : "unhide_recipe", "recipe", req.params.id as string);
     res.json({ success: true, isHidden: recipe.isHidden });
   } catch (error) {
-    console.error("Failed to toggle recipe visibility:", error);
+    logger.error({ err: error }, "Failed to toggle recipe visibility");
     res.status(500).json({ error: "Failed to update recipe" });
   }
 }
@@ -143,7 +149,7 @@ export async function toggleFeatureRecipe(
     });
     res.json({ success: true, isFeatured: true });
   } catch (error) {
-    console.error("Failed to toggle recipe feature:", error);
+    logger.error({ err: error }, "Failed to toggle recipe feature");
     res.status(500).json({ error: "Failed to update recipe" });
   }
 }
@@ -168,7 +174,7 @@ export async function deleteRecipe(
     await audit(req, "delete_recipe", "recipe", req.params.id as string, { title: recipe.title });
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to delete recipe:", error);
+    logger.error({ err: error }, "Failed to delete recipe");
     res.status(500).json({ error: "Failed to delete recipe" });
   }
 }
@@ -187,7 +193,7 @@ export async function recipeDetail(
     }
     res.json({ recipe });
   } catch (error) {
-    console.error("Failed to get recipe detail:", error);
+    logger.error({ err: error }, "Failed to get recipe detail");
     res.status(500).json({ error: "Failed to load recipe" });
   }
 }
@@ -231,7 +237,7 @@ export async function updateRecipe(
     await audit(req, "update_recipe", "recipe", req.params.id as string, sanitized);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to update recipe:", error);
+    logger.error({ err: error }, "Failed to update recipe");
     res.status(500).json({ error: "Failed to update recipe" });
   }
 }

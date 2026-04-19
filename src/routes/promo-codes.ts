@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
+import { strictLimiter } from "../middleware/rateLimit";
 import { PromoCode, PromoRedemption } from "../models/PromoCode";
 import User from "../models/User";
 
@@ -35,6 +36,9 @@ function asyncHandler(
  */
 router.post(
   "/redeem",
+  // Tight rate limit — promo redemption is a high-value write that can grant
+  // paid-tier access; no legitimate user needs to fire it repeatedly.
+  strictLimiter,
   requireAuth,
   validate({ body: redeemSchema }),
   asyncHandler(async (req: Request, res: Response) => {
@@ -96,16 +100,24 @@ router.post(
       return;
     }
 
-    // Calculate premium expiry
-    const premiumExpiresAt = new Date();
-    premiumExpiresAt.setDate(
-      premiumExpiresAt.getDate() + promoCode.durationDays
+    // Extend premium from whichever is later — now, or the existing expiry.
+    // This prevents a downgrade when a user with paid premium redeems a short promo.
+    const baseline = Math.max(
+      now.getTime(),
+      user.premiumExpiresAt ? new Date(user.premiumExpiresAt).getTime() : 0
+    );
+    const premiumExpiresAt = new Date(
+      baseline + promoCode.durationDays * 24 * 60 * 60 * 1000
     );
 
-    // Grant premium to user
+    // Grant premium to user — preserve an existing paid plan label so a promo
+    // top-up doesn't downgrade a "monthly"/"annual" subscriber to "promo".
+    const isPaidPlan =
+      user.premiumPlan === "monthly" || user.premiumPlan === "annual";
+    const nextPlan = isPaidPlan ? user.premiumPlan : "promo";
     await User.findByIdAndUpdate(user._id, {
       isPremium: true,
-      premiumPlan: "promo",
+      premiumPlan: nextPlan,
       premiumExpiresAt,
     });
 

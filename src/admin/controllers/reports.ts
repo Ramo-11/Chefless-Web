@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Report from "../../models/Report";
 import Recipe from "../../models/Recipe";
 import User from "../../models/User";
+import { logger } from "../../lib/logger";
 
 export async function reportsPage(
   req: Request,
@@ -61,7 +62,7 @@ export async function reportsPage(
       pendingCount,
     });
   } catch (error) {
-    console.error("Failed to load reports page:", error);
+    logger.error({ err: error }, "Failed to load reports page");
     res.status(500).send("Internal server error");
   }
 }
@@ -90,7 +91,7 @@ export async function reviewReport(
 
     res.json({ success: true, report });
   } catch (error) {
-    console.error("Failed to review report:", error);
+    logger.error({ err: error }, "Failed to review report");
     res.status(500).json({ error: "Failed to update report" });
   }
 }
@@ -112,7 +113,7 @@ export async function dismissReport(
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to dismiss report:", error);
+    logger.error({ err: error }, "Failed to dismiss report");
     res.status(500).json({ error: "Failed to dismiss report" });
   }
 }

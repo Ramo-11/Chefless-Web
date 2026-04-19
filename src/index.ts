@@ -1,17 +1,19 @@
 import path from "path";
 import crypto from "crypto";
 import express from "express";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import helmet from "helmet";
 import session from "express-session";
 import MongoStore from "connect-mongo";
 import { env } from "./lib/env";
 import { connectDatabase } from "./lib/db";
+import { logger } from "./lib/logger";
 import {
   apiReadLimiter,
   apiWriteLimiter,
   strictLimiter,
   authLimiter,
+  webhookLimiter,
 } from "./middleware/rateLimit";
 import { errorHandler } from "./middleware/errorHandler";
 import healthRouter from "./routes/health";
@@ -32,6 +34,7 @@ import aiRouter from "./routes/ai";
 import promoCodesRouter from "./routes/promo-codes";
 import adminRouter from "./admin/routes";
 import pagesRouter from "./routes/pages";
+import blocksRouter from "./routes/blocks";
 
 const app = express();
 
@@ -50,16 +53,25 @@ app.use(helmet({
   contentSecurityPolicy: false, // CSP managed separately for admin EJS views
 }));
 
-// ── Core middleware ─────────────────────────────────────────────────
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-  : [];
+// ── CORS ────────────────────────────────────────────────────────────
+// In production, require an explicit allowlist. If ALLOWED_ORIGINS is empty,
+// refuse all browser origins (passing `origin: false` to cors). Server-to-
+// server and mobile clients don't send an Origin header and remain unaffected.
+// In development, allow any origin for local tooling.
+const isProd = env.NODE_ENV === "production";
+const corsOriginOption: CorsOptions["origin"] = isProd
+  ? env.ALLOWED_ORIGINS.length > 0
+    ? env.ALLOWED_ORIGINS
+    : false
+  : true;
 
 app.use(cors({
-  origin: allowedOrigins.length > 0 ? allowedOrigins : undefined,
+  origin: corsOriginOption,
   methods: ["GET", "POST", "PATCH", "DELETE"],
-  allowedHeaders: ["Authorization", "Content-Type"],
+  allowedHeaders: ["Authorization", "Content-Type", "X-CSRF-Token"],
+  credentials: true,
 }));
+
 app.use(express.urlencoded({ extended: true }));
 
 // ── Request ID for tracing ─────────────────────────────────────────
@@ -88,7 +100,7 @@ app.use(
     cookie: {
       maxAge: 4 * 60 * 60 * 1000, // 4 hours for admin sessions
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isProd,
       sameSite: "lax",
     },
   })
@@ -101,7 +113,17 @@ app.use("/", pagesRouter);
 app.use("/admin", adminRouter);
 
 // ── Webhook routes (no auth — they verify their own secrets) ────────
-app.use("/api/webhooks", webhooksRouter);
+// RevenueCat webhooks are authorized by a shared Bearer token (see
+// routes/webhooks.ts) and carry JSON bodies. We verify the *token*, not a
+// signature over the raw body, so parsing JSON here is safe. If the provider
+// is ever swapped for one that signs raw bytes, this mount must move to
+// express.raw and the verifier will need access to the raw buffer.
+app.use(
+  "/api/webhooks",
+  webhookLimiter,
+  express.json({ limit: "1mb" }),
+  webhooksRouter
+);
 
 // ── API routes ──────────────────────────────────────────────────────
 // Rate limit strategy:
@@ -127,14 +149,15 @@ app.use("/api/labels", jsonDefault, ...apiLimiters, labelsRouter);
 app.use("/api/reports", jsonDefault, strictLimiter, reportsRouter);
 app.use("/api/ai", jsonDefault, strictLimiter, aiRouter);
 app.use("/api/promo-codes", jsonDefault, ...apiLimiters, promoCodesRouter);
+app.use("/api/blocks", jsonDefault, ...apiLimiters, blocksRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);
 
 app.listen(env.PORT, () => {
-  console.log(`Chefless API running on port ${env.PORT}`);
+  logger.info({ port: env.PORT }, "Chefless API listening");
   connectDatabase().catch((error) => {
-    console.error("MongoDB connection failed:", error);
+    logger.error({ err: error }, "MongoDB connection failed");
   });
 });
 

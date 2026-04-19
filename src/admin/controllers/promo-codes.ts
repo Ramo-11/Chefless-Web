@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PromoCode, PromoRedemption } from "../../models/PromoCode";
 import AuditLog from "../../models/AuditLog";
+import { logger } from "../../lib/logger";
 
 async function audit(
   req: Request,
@@ -18,7 +19,7 @@ async function audit(
     details,
     ipAddress: req.ip,
   }).catch((err: unknown) => {
-    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+    logger.error({ err }, "Audit log failed");
   });
 }
 
@@ -33,7 +34,7 @@ export async function promoCodesPage(
 
     res.render("promo-codes", { page: "promo-codes", promoCodes });
   } catch (error) {
-    console.error("Failed to load promo codes page:", error);
+    logger.error({ err: error }, "Failed to load promo codes page");
     res.status(500).send("Internal server error");
   }
 }
@@ -107,7 +108,7 @@ export async function createPromoCode(
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to create promo code:", error);
+    logger.error({ err: error }, "Failed to create promo code");
     res.status(500).json({ error: "Failed to create promo code" });
   }
 }
@@ -180,7 +181,7 @@ export async function updatePromoCode(
     await audit(req, "update_promo_code", "promo_code", req.params.id as string, updates);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to update promo code:", error);
+    logger.error({ err: error }, "Failed to update promo code");
     res.status(500).json({ error: "Failed to update promo code" });
   }
 }
@@ -206,7 +207,7 @@ export async function deletePromoCode(
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to delete promo code:", error);
+    logger.error({ err: error }, "Failed to delete promo code");
     res.status(500).json({ error: "Failed to delete promo code" });
   }
 }
@@ -231,7 +232,7 @@ export async function promoCodeDetail(
 
     res.json({ promoCode, redemptions });
   } catch (error) {
-    console.error("Failed to get promo code detail:", error);
+    logger.error({ err: error }, "Failed to get promo code detail");
     res.status(500).json({ error: "Failed to load promo code details" });
   }
 }

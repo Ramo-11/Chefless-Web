@@ -1,6 +1,12 @@
 import { Request, Response } from "express";
 import SeasonalTag from "../../models/SeasonalTag";
 import Recipe from "../../models/Recipe";
+import { logger } from "../../lib/logger";
+
+/** Escape user input for use inside a MongoDB `$regex` expression. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export async function seasonalPage(
   req: Request,
@@ -25,7 +31,7 @@ export async function seasonalPage(
 
     if (search) {
       searchResults = await Recipe.find({
-        title: { $regex: search, $options: "i" },
+        title: { $regex: escapeRegex(search), $options: "i" },
         isHidden: { $ne: true },
       })
         .populate("authorId", "fullName")
@@ -43,7 +49,7 @@ export async function seasonalPage(
       search,
     });
   } catch (error) {
-    console.error("Failed to load seasonal page:", error);
+    logger.error({ err: error }, "Failed to load seasonal page");
     res.status(500).send("Internal server error");
   }
 }
@@ -72,7 +78,7 @@ export async function createTag(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to create tag:", error);
+    logger.error({ err: error }, "Failed to create tag");
     res.status(500).json({ error: "Failed to create tag" });
   }
 }
@@ -88,7 +94,7 @@ export async function toggleTag(req: Request, res: Response): Promise<void> {
     await tag.save();
     res.json({ success: true, isActive: tag.isActive });
   } catch (error) {
-    console.error("Failed to toggle tag:", error);
+    logger.error({ err: error }, "Failed to toggle tag");
     res.status(500).json({ error: "Failed to update tag" });
   }
 }
@@ -110,7 +116,7 @@ export async function deleteTag(req: Request, res: Response): Promise<void> {
     await SeasonalTag.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to delete tag:", error);
+    logger.error({ err: error }, "Failed to delete tag");
     res.status(500).json({ error: "Failed to delete tag" });
   }
 }
@@ -139,7 +145,7 @@ export async function tagRecipe(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to tag recipe:", error);
+    logger.error({ err: error }, "Failed to tag recipe");
     res.status(500).json({ error: "Failed to tag recipe" });
   }
 }
@@ -165,7 +171,7 @@ export async function untagRecipe(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to untag recipe:", error);
+    logger.error({ err: error }, "Failed to untag recipe");
     res.status(500).json({ error: "Failed to untag recipe" });
   }
 }

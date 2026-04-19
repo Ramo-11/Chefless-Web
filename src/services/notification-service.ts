@@ -54,12 +54,17 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
     case "follow_accepted":
       return params.actorId ? `/user/${params.actorId}` : null;
     case "schedule_suggestion":
-      // Approver-facing — land them on the pending suggestions list.
-      return "/schedule/suggestions";
+      // Approver-facing — land them on the exact schedule day/slot when we
+      // have the entry id, otherwise fall back to the pending list.
+      return params.scheduleEntryId
+        ? `/schedule?suggestionId=${params.scheduleEntryId}`
+        : "/schedule/suggestions";
     case "suggestion_approved":
     case "suggestion_denied":
-      // Suggester-facing — land them on the main schedule.
-      return "/schedule";
+      // Suggester-facing — land them on the exact entry on the schedule.
+      return params.scheduleEntryId
+        ? `/schedule?entryId=${params.scheduleEntryId}`
+        : "/schedule";
     case "kitchen_joined":
     case "kitchen_invite":
     case "kitchen_removed":
@@ -132,6 +137,9 @@ export async function createNotification(
     }
     if (params.kitchenId) {
       pushData.kitchenId = params.kitchenId.toString();
+    }
+    if (params.scheduleEntryId) {
+      pushData.scheduleEntryId = params.scheduleEntryId.toString();
     }
     if (params.inviteId) {
       pushData.inviteId = params.inviteId.toString();

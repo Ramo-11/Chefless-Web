@@ -4,6 +4,12 @@ import User from "../../models/User";
 import ScheduleEntry from "../../models/ScheduleEntry";
 import ShoppingList from "../../models/ShoppingList";
 import AuditLog from "../../models/AuditLog";
+import { logger } from "../../lib/logger";
+
+/** Escape user input for use inside a MongoDB `$regex` expression. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 async function audit(
   req: Request,
@@ -21,7 +27,7 @@ async function audit(
     details,
     ipAddress: req.ip,
   }).catch((err: unknown) => {
-    console.error("Audit log failed:", err instanceof Error ? err.message : err);
+    logger.error({ err }, "Audit log failed");
   });
 }
 
@@ -37,7 +43,7 @@ export async function kitchensPage(
     const query: Record<string, unknown> = {};
 
     if (search) {
-      query.name = { $regex: search, $options: "i" };
+      query.name = { $regex: escapeRegex(search), $options: "i" };
     }
 
     const skip = (page - 1) * limit;
@@ -62,7 +68,7 @@ export async function kitchensPage(
       search,
     });
   } catch (error) {
-    console.error("Failed to load kitchens page:", error);
+    logger.error({ err: error }, "Failed to load kitchens page");
     res.status(500).send("Internal server error");
   }
 }
@@ -87,7 +93,7 @@ export async function kitchenDetail(
 
     res.json({ kitchen, members });
   } catch (error) {
-    console.error("Failed to get kitchen detail:", error);
+    logger.error({ err: error }, "Failed to get kitchen detail");
     res.status(500).json({ error: "Failed to load kitchen" });
   }
 }
@@ -120,7 +126,7 @@ export async function kitchenSuggestions(
 
     res.json({ suggestions });
   } catch (error) {
-    console.error("Failed to load kitchen suggestions:", error);
+    logger.error({ err: error }, "Failed to load kitchen suggestions");
     res.status(500).json({ error: "Failed to load suggestions" });
   }
 }
@@ -153,7 +159,7 @@ export async function updateKitchen(
     await audit(req, "update_kitchen", "kitchen", req.params.id as string, sanitized);
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to update kitchen:", error);
+    logger.error({ err: error }, "Failed to update kitchen");
     res.status(500).json({ error: "Failed to update kitchen" });
   }
 }
@@ -201,7 +207,7 @@ export async function removeKitchenMember(
     await audit(req, "remove_kitchen_member", "kitchen", id as string, { memberId });
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to remove kitchen member:", error);
+    logger.error({ err: error }, "Failed to remove kitchen member");
     res.status(500).json({ error: "Failed to remove member" });
   }
 }
@@ -241,7 +247,7 @@ export async function transferKitchenLead(
     });
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to transfer kitchen lead:", error);
+    logger.error({ err: error }, "Failed to transfer kitchen lead");
     res.status(500).json({ error: "Failed to transfer lead" });
   }
 }
@@ -267,7 +273,7 @@ export async function deleteKitchen(
     await audit(req, "delete_kitchen", "kitchen", id as string, { name: kitchen.name });
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to delete kitchen:", error);
+    logger.error({ err: error }, "Failed to delete kitchen");
     res.status(500).json({ error: "Failed to delete kitchen" });
   }
 }

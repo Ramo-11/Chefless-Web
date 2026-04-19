@@ -4,6 +4,7 @@ import Recipe from "../../models/Recipe";
 import Kitchen from "../../models/Kitchen";
 import ScheduleEntry from "../../models/ScheduleEntry";
 import Report from "../../models/Report";
+import { logger } from "../../lib/logger";
 
 interface DailyCount {
   date: string;
@@ -531,7 +532,7 @@ export async function analyticsPage(
       topRemixedRecipes,
     });
   } catch (error) {
-    console.error("Failed to load analytics:", error);
+    logger.error({ err: error }, "Failed to load analytics");
     res.status(500).send("Internal server error");
   }
 }

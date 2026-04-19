@@ -1,19 +1,58 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import mongoose from "mongoose";
+import { logger } from "../lib/logger";
 
 interface AppError extends Error {
   statusCode?: number;
 }
 
+/**
+ * Determine the HTTP status code for a given error. Returns a pair so we can
+ * pick log level (warn for 4xx, error for 5xx) without recomputing.
+ */
+function deriveStatus(err: AppError): number {
+  if (err instanceof ZodError) return 400;
+  if (err instanceof mongoose.Error.ValidationError) return 400;
+  if (err instanceof mongoose.Error.CastError) return 400;
+  if (
+    err !== null &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code?: number }).code === 11000
+  ) {
+    return 409;
+  }
+  if (err.statusCode && err.statusCode >= 400 && err.statusCode < 600) {
+    return err.statusCode;
+  }
+  return 500;
+}
+
 export function errorHandler(
   err: AppError,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ): void {
-  const requestId = _req.requestId ?? "unknown";
-  console.error(`[Error] [${requestId}] ${err.message}`, err.stack);
+  const requestId = req.requestId ?? "unknown";
+  const status = deriveStatus(err);
+
+  const baseFields = {
+    requestId,
+    status,
+    method: req.method,
+    path: req.path,
+    message: err.message,
+  };
+
+  if (status >= 500) {
+    // Full error with stack for server-side bugs.
+    logger.error({ ...baseFields, err }, "Request failed");
+  } else {
+    // Client errors — warn level, no stack (noise, not actionable).
+    logger.warn(baseFields, "Client request error");
+  }
 
   // Zod validation errors
   if (err instanceof ZodError) {

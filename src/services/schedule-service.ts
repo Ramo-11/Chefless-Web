@@ -2,7 +2,7 @@ import { Types } from "mongoose";
 import ScheduleEntry, { IScheduleEntry } from "../models/ScheduleEntry";
 import Kitchen from "../models/Kitchen";
 import Recipe from "../models/Recipe";
-import User from "../models/User";
+import User, { IUser } from "../models/User";
 import {
   notifyScheduleSuggestion,
   notifyScheduleImportSuggestions,
@@ -10,6 +10,7 @@ import {
   notifySuggestionDeniedWithData,
 } from "./notification-service";
 import { hasActivePremium } from "../lib/premium";
+import { canViewRecipe } from "./visibility-service";
 
 interface ServiceError extends Error {
   statusCode: number;
@@ -123,7 +124,7 @@ export async function addEntry(
     }
 
     if (data.recipeId) {
-      await populateRecipeFields(entryFields, data.recipeId);
+      await populateRecipeFields(entryFields, data.recipeId, userId);
     }
 
     return ScheduleEntry.create(entryFields);
@@ -169,7 +170,7 @@ export async function addEntry(
   }
 
   if (data.recipeId) {
-    await populateRecipeFields(entryFields, data.recipeId);
+    await populateRecipeFields(entryFields, data.recipeId, userId);
   }
 
   const entry = await ScheduleEntry.create(entryFields);
@@ -189,27 +190,52 @@ export async function addEntry(
   return entry;
 }
 
-/** Populates recipe-related fields on the entry fields object. */
+/**
+ * Populates recipe-related fields on the entry fields object.
+ * Requires the acting user so we can enforce recipe visibility — scheduling a
+ * recipe a user cannot see would leak the title/photo across privacy boundaries.
+ */
 async function populateRecipeFields(
   entryFields: Record<string, unknown>,
-  recipeId: string
+  recipeId: string,
+  actingUserId: string
 ): Promise<void> {
   const recipe = await Recipe.findById(recipeId)
-    .select("title photos authorId prepTime")
+    .select("title photos authorId prepTime isPrivate isHidden")
     .lean();
   if (!recipe) {
     throw createError("Recipe not found", 404);
   }
 
   const author = await User.findById(recipe.authorId)
-    .select("fullName")
+    .select("fullName isPublic kitchenId isBanned")
     .lean();
+  if (!author) {
+    throw createError("Recipe author not found", 404);
+  }
+
+  // Hidden (admin-moderated) or banned-author recipes are off limits for scheduling
+  if (recipe.isHidden || author.isBanned) {
+    throw createError("You cannot schedule this recipe", 403);
+  }
+
+  const canView = await canViewRecipe(
+    new Types.ObjectId(actingUserId),
+    recipe,
+    author as unknown as IUser
+  );
+  if (!canView) {
+    throw createError(
+      "You do not have permission to schedule this recipe",
+      403
+    );
+  }
 
   entryFields.recipeId = new Types.ObjectId(recipeId);
   entryFields.recipeTitle = recipe.title;
   entryFields.recipePhoto = recipe.photos.length > 0 ? recipe.photos[0] : undefined;
   entryFields.recipeAuthorId = recipe.authorId;
-  entryFields.recipeAuthorName = author?.fullName;
+  entryFields.recipeAuthorName = author.fullName;
   if (recipe.prepTime != null) {
     entryFields.prepTime = recipe.prepTime;
   }
@@ -313,7 +339,7 @@ export async function updateEntry(
   }
 
   if (updates.recipeId !== undefined) {
-    await populateRecipeFields(updateFields, updates.recipeId);
+    await populateRecipeFields(updateFields, updates.recipeId, userId);
   }
 
   const updated = await ScheduleEntry.findByIdAndUpdate(

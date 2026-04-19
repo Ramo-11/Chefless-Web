@@ -3,6 +3,7 @@ import Cookbook, { ICookbook } from "../models/Cookbook";
 import Recipe, { IRecipe } from "../models/Recipe";
 import User, { IUser } from "../models/User";
 import { canViewProfile, canViewRecipe } from "./visibility-service";
+import { isBlocked } from "./block-service";
 
 interface AppError extends Error {
   statusCode: number;
@@ -69,6 +70,15 @@ async function loadVisibleCookbook(
   if (!isOwner) {
     if (cookbook.isPrivate) {
       throw createError("You do not have permission to view this cookbook", 403);
+    }
+    // Bidirectional block check: either side blocking hides the cookbook.
+    // Surface as 404 so the UI doesn't leak the fact that the cookbook
+    // exists — identical to how a deleted cookbook responds.
+    if (viewerId) {
+      const blocked = await isBlocked(viewerId, cookbook.ownerId.toString());
+      if (blocked) {
+        throw createError("Cookbook not found", 404);
+      }
     }
     const canSeeProfile = await canViewProfile(viewerId, owner);
     if (!canSeeProfile) {
@@ -211,6 +221,14 @@ export async function listUserCookbooks(
 
   const isOwner = !!viewerId && owner._id.equals(viewerId);
   if (!isOwner) {
+    // Bidirectional block: return empty rather than 403 so the privacy wall
+    // renders identically to "no cookbooks yet".
+    if (viewerId) {
+      const blocked = await isBlocked(viewerId, owner._id.toString());
+      if (blocked) {
+        return { data: [], page, limit, total: 0, totalPages: 0 };
+      }
+    }
     const canSee = await canViewProfile(viewerId, owner);
     if (!canSee) {
       // Mirror profile privacy — return empty rather than 403 so the UI can
@@ -247,13 +265,38 @@ export async function getCookbook(
   cookbookId: string,
   viewerId: string | null
 ): Promise<ICookbook & { ownerName?: string; ownerPhoto?: string | null }> {
-  const { cookbook, owner } = await loadVisibleCookbook(cookbookId, viewerId);
+  const { cookbook, owner, isOwner } = await loadVisibleCookbook(
+    cookbookId,
+    viewerId
+  );
   const obj = cookbook.toObject() as unknown as ICookbook & {
     ownerName?: string;
     ownerPhoto?: string | null;
   };
   obj.ownerName = owner.fullName;
   obj.ownerPhoto = owner.profilePicture ?? null;
+
+  // Owners see everything; non-owners must never learn the IDs of private
+  // recipes inside a cookbook. Filter `recipeIds` to the subset the viewer is
+  // actually allowed to see (visibility applied per-recipe via canViewRecipe).
+  // Mutate only the returned plain object, never the Mongoose document.
+  if (!isOwner && cookbook.recipeIds.length > 0) {
+    const recipes = await Recipe.find({
+      _id: { $in: cookbook.recipeIds },
+    })
+      .select("_id authorId isPrivate")
+      .lean<
+        { _id: Types.ObjectId; authorId: Types.ObjectId; isPrivate: boolean }[]
+      >();
+
+    const visibleIds: Types.ObjectId[] = [];
+    for (const r of recipes) {
+      const canSee = await canViewRecipe(viewerId, r, owner);
+      if (canSee) visibleIds.push(r._id);
+    }
+    obj.recipeIds = visibleIds;
+  }
+
   return obj;
 }
 

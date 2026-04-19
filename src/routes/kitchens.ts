@@ -3,7 +3,7 @@ import { z } from "zod";
 import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { strictLimiter } from "../middleware/rateLimit";
+import { strictLimiter, joinKitchenLimiter } from "../middleware/rateLimit";
 import User from "../models/User";
 import Kitchen from "../models/Kitchen";
 import {
@@ -180,9 +180,13 @@ router.delete(
 );
 
 // POST /api/kitchens/join — Join via invite code
+// `joinKitchenLimiter` is applied per-IP so an attacker cannot brute-force the
+// 6-character invite code space (36^6 ≈ 2.2B, but 30 attempts/15min caps the
+// realistic throughput to < 3k/day per IP).
 router.post(
   "/join",
   requireAuth,
+  joinKitchenLimiter,
   validate({ body: joinKitchenSchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const firebaseUid = req.user!.uid;

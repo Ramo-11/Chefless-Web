@@ -70,6 +70,23 @@ export const strictLimiter = rateLimit({
 });
 
 /**
+ * Kitchen join — per-IP to slow brute-forcing the 6-char invite code. A
+ * correct guess joins the attacker into a kitchen, so the limit is tight.
+ * IP-keyed (not user-keyed) because the attack is enumerating codes — an
+ * attacker rotating accounts would still sit behind one IP.
+ */
+export const joinKitchenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: isDev ? 200 : 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => `ip:${req.ip ?? "unknown"}`,
+  message: {
+    error: "Too many kitchen join attempts, please try again later.",
+  },
+});
+
+/**
  * Auth — per-IP (no user yet). Tighter to slow credential stuffing.
  * Excludes token-refresh and other safe auth reads if any.
  */
@@ -82,4 +99,18 @@ export const authLimiter = rateLimit({
   message: {
     error: "Too many authentication attempts, please try again later.",
   },
+});
+
+/**
+ * Webhook limiter — per source IP. Providers like RevenueCat have bounded
+ * retry rates (a handful per minute per event). 120/min per IP is permissive
+ * enough for legitimate provider bursts yet blocks obvious abuse.
+ */
+export const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: isDev ? 1000 : 120,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => `ip:${req.ip ?? "unknown"}`,
+  message: { error: "Too many webhook requests" },
 });

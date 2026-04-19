@@ -18,6 +18,9 @@ interface ReportFilters {
   limit: number;
 }
 
+const REPORTS_PER_DAY_LIMIT = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export async function createReport(input: CreateReportInput) {
   const { reporterId, targetType, targetId, reason, description } = input;
 
@@ -34,6 +37,21 @@ export async function createReport(input: CreateReportInput) {
     if (user._id.toString() === reporterId) {
       throw Object.assign(new Error("You cannot report yourself"), { statusCode: 400 });
     }
+  }
+
+  // Rate limit: a single reporter may submit at most 3 reports in any rolling 24h window.
+  const dayAgo = new Date(Date.now() - DAY_MS);
+  const recentCount = await Report.countDocuments({
+    reporterId: new Types.ObjectId(reporterId),
+    createdAt: { $gte: dayAgo },
+  });
+  if (recentCount >= REPORTS_PER_DAY_LIMIT) {
+    throw Object.assign(
+      new Error(
+        `You have reached the daily report limit (${REPORTS_PER_DAY_LIMIT}). Please try again later.`
+      ),
+      { statusCode: 429 }
+    );
   }
 
   // Check for duplicate

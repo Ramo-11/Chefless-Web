@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import SystemLabel from "../../models/SystemLabel";
+import { logger } from "../../lib/logger";
 
 export async function labelsPage(req: Request, res: Response): Promise<void> {
   try {
     const labels = await SystemLabel.find().sort({ order: 1 }).lean();
     res.render("labels", { page: "labels", labels });
   } catch (error) {
-    console.error("Failed to load labels page:", error);
+    logger.error({ err: error }, "Failed to load labels page");
     res.status(500).send("Internal server error");
   }
 }
@@ -35,7 +36,7 @@ export async function createLabel(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to create label:", error);
+    logger.error({ err: error }, "Failed to create label");
     res.status(500).json({ error: "Failed to create label" });
   }
 }
@@ -66,7 +67,7 @@ export async function updateLabel(req: Request, res: Response): Promise<void> {
 
     res.json({ success: true, label });
   } catch (error) {
-    console.error("Failed to update label:", error);
+    logger.error({ err: error }, "Failed to update label");
     res.status(500).json({ error: "Failed to update label" });
   }
 }
@@ -80,7 +81,7 @@ export async function deleteLabel(req: Request, res: Response): Promise<void> {
     }
     res.json({ success: true });
   } catch (error) {
-    console.error("Failed to delete label:", error);
+    logger.error({ err: error }, "Failed to delete label");
     res.status(500).json({ error: "Failed to delete label" });
   }
 }

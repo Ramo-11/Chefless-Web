@@ -32,20 +32,10 @@ export async function canViewProfile(
     return true;
   }
 
-  // Check if they share a kitchen
-  if (targetUser.kitchenId && targetUser.kitchenId) {
-    // Lazy import to avoid circular dependencies
-    const User = (await import("../models/User")).default;
-    const viewer = await User.findById(viewerId).select("kitchenId").lean();
-    if (
-      viewer &&
-      viewer.kitchenId &&
-      targetUser.kitchenId.equals(viewer.kitchenId)
-    ) {
-      return true;
-    }
-  }
-
+  // NOTE: Kitchen co-membership does NOT grant profile visibility.
+  // Per ARCHITECTURE.md's privacy rules, joining a kitchen grants implicit
+  // *recipe* visibility only — profiles remain gated by account privacy and
+  // follow status. (See `canViewRecipe` below for the recipe-side rule.)
   return false;
 }
 
