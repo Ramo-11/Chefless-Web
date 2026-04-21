@@ -50,6 +50,10 @@ export interface IRecipe extends Document {
   seasonalTags: string[];
   likesCount: number;
   forksCount: number;
+  /** Denormalized mean of ratings visible globally (only public-visibility kitchens + solo cooks contribute). */
+  avgRating: number;
+  /** Count of ratings feeding `avgRating`. Zero when no public ratings exist. */
+  ratingCount: number;
   isFeatured: boolean;
   featuredAt?: Date;
   createdAt: Date;
@@ -206,6 +210,17 @@ const recipeSchema = new Schema<IRecipe>(
     forksCount: {
       type: Number,
       default: 0,
+    },
+    avgRating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
+    ratingCount: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     isFeatured: {
       type: Boolean,

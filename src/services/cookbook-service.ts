@@ -4,6 +4,7 @@ import Recipe, { IRecipe } from "../models/Recipe";
 import User, { IUser } from "../models/User";
 import { canViewProfile, canViewRecipe } from "./visibility-service";
 import { isBlocked } from "./block-service";
+import { hydrateListForViewer } from "./recipe-service";
 
 interface AppError extends Error {
   statusCode: number;
@@ -453,8 +454,10 @@ export async function listCookbookRecipes(
     if (canSee) visible.push(recipe);
   }
 
+  const hydrated = await hydrateListForViewer(visible, viewerId);
+
   return {
-    data: visible,
+    data: hydrated,
     page,
     limit,
     total,

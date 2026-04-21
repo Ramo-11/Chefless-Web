@@ -80,11 +80,32 @@ export interface IUser extends Document {
   banReason?: string;
   bannedAt?: Date;
   lastActiveAt: Date;
+  /**
+   * Minutes east of UTC for the user's last-known local timezone, captured
+   * from the client on each AI call (e.g. `-240` for UTC-4 / New York DST,
+   * `540` for Tokyo). Used so the daily AI quota resets at the user's local
+   * midnight instead of UTC midnight. Optional — falls back to UTC when
+   * absent. Stored to keep a record visible in the admin panel.
+   */
+  timezoneOffsetMinutes?: number;
   createdAt: Date;
   updatedAt: Date;
-  /** UTC calendar day (YYYY-MM-DD) for daily AI helper rate limit */
+  /**
+   * Local calendar day (YYYY-MM-DD in `timezone`, or UTC fallback) the daily
+   * counter is scoped to. `aiRecipeHelperUsageCount` resets when this rolls
+   * over to a new day.
+   */
   aiRecipeHelperUsageDay?: string;
+  /** Count of AI calls made during [aiRecipeHelperUsageDay]. */
   aiRecipeHelperUsageCount?: number;
+  /** Lifetime count across all AI features. */
+  aiTotalMessagesSent?: number;
+  /** Lifetime per-feature counters. */
+  aiGenerateCount?: number;
+  aiSubstitutionsCount?: number;
+  aiFormatCount?: number;
+  /** Timestamp of the most recent successful AI call. */
+  aiLastUsedAt?: Date;
 }
 
 const shippingAddressSchema = new Schema<ShippingAddress>(
@@ -211,8 +232,14 @@ const userSchema = new Schema<IUser>(
       type: Date,
       default: Date.now,
     },
+    timezoneOffsetMinutes: { type: Number },
     aiRecipeHelperUsageDay: { type: String },
     aiRecipeHelperUsageCount: { type: Number, default: 0 },
+    aiTotalMessagesSent: { type: Number, default: 0 },
+    aiGenerateCount: { type: Number, default: 0 },
+    aiSubstitutionsCount: { type: Number, default: 0 },
+    aiFormatCount: { type: Number, default: 0 },
+    aiLastUsedAt: { type: Date },
   },
   {
     timestamps: true,

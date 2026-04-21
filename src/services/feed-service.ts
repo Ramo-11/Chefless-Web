@@ -3,6 +3,7 @@ import Recipe, { IRecipe } from "../models/Recipe";
 import User, { IUser } from "../models/User";
 import Follow from "../models/Follow";
 import Like from "../models/Like";
+import SavedRecipe from "../models/SavedRecipe";
 import SeasonalTag from "../models/SeasonalTag";
 import { getBlockedUserIds } from "./block-service";
 
@@ -38,6 +39,7 @@ interface FeedRecipe {
   authorName: string;
   authorPhoto?: string;
   isLiked: boolean;
+  isSaved: boolean;
 }
 
 interface PaginatedFeed {
@@ -158,18 +160,28 @@ async function enrichRecipes(
     authors.map((a) => [a._id.toString(), a])
   );
 
-  // Fetch user's likes for these recipes
+  // Fetch user's likes + saves for these recipes in parallel
   const recipeIds = recipes.map((r) => r._id);
-  const likes = await Like.find({
-    userId,
-    recipeId: { $in: recipeIds },
-  })
-    .select("recipeId")
-    .lean();
+  const [likes, saves] = await Promise.all([
+    Like.find({
+      userId,
+      recipeId: { $in: recipeIds },
+    })
+      .select("recipeId")
+      .lean(),
+    SavedRecipe.find({
+      userId,
+      recipeId: { $in: recipeIds },
+    })
+      .select("recipeId")
+      .lean(),
+  ]);
   const likedSet = new Set(likes.map((l) => l.recipeId.toString()));
+  const savedSet = new Set(saves.map((s) => s.recipeId.toString()));
 
   return recipes.map((recipe) => {
     const author = authorMap.get(recipe.authorId.toString());
+    const id = recipe._id.toString();
     return {
       _id: recipe._id,
       authorId: recipe.authorId,
@@ -199,7 +211,8 @@ async function enrichRecipes(
       updatedAt: recipe.updatedAt,
       authorName: author?.fullName ?? "Unknown",
       authorPhoto: author?.profilePicture,
-      isLiked: likedSet.has(recipe._id.toString()),
+      isLiked: likedSet.has(id),
+      isSaved: savedSet.has(id),
     };
   });
 }

@@ -80,7 +80,34 @@ export async function userDetail(req: Request, res: Response): Promise<void> {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    res.json({ user });
+
+    // Roll up AI counters into a single struct so the admin UI doesn't have
+    // to repeat day-key math. `usedToday` is the stored counter only if it
+    // still belongs to *today's* local day in the user's zone — otherwise
+    // zero, matching how the quota check behaves at runtime.
+    const offset = user.timezoneOffsetMinutes;
+    const todayKey =
+      offset != null && Number.isFinite(offset)
+        ? new Date(Date.now() + offset * 60_000).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+    const usedToday =
+      user.aiRecipeHelperUsageDay === todayKey
+        ? user.aiRecipeHelperUsageCount ?? 0
+        : 0;
+
+    const ai = {
+      usedToday,
+      limit: 20,
+      dayKey: user.aiRecipeHelperUsageDay ?? null,
+      totalMessagesSent: user.aiTotalMessagesSent ?? 0,
+      generateCount: user.aiGenerateCount ?? 0,
+      substitutionsCount: user.aiSubstitutionsCount ?? 0,
+      formatCount: user.aiFormatCount ?? 0,
+      lastUsedAt: user.aiLastUsedAt ?? null,
+      timezoneOffsetMinutes: user.timezoneOffsetMinutes ?? null,
+    };
+
+    res.json({ user, ai });
   } catch (error) {
     logger.error({ err: error }, "Failed to get user detail");
     res.status(500).json({ error: "Failed to load user" });

@@ -23,6 +23,11 @@ import {
   listSharedWithMe,
   uploadRecipePhoto,
 } from "../services/recipe-service";
+import {
+  upsertRating,
+  deleteRating,
+  getRatingAggregateForViewer,
+} from "../services/rating-service";
 import { importRecipeFromUrl } from "../services/recipe-import-service";
 
 const router = Router();
@@ -475,6 +480,85 @@ router.delete(
     await unsaveRecipe(id, user._id.toString());
 
     res.status(200).json({ success: true });
+  })
+);
+
+// ── Ratings ─────────────────────────────────────────────────────────
+
+const rateSchema = z.object({
+  stars: z.number().int().min(1).max(5),
+  note: z.string().max(500).optional(),
+  scheduleEntryId: z
+    .string()
+    .refine(isValidObjectId, { message: "Invalid schedule entry ID" })
+    .optional(),
+});
+
+// POST /api/recipes/:id/rate — upsert viewer's rating
+router.post(
+  "/:id/rate",
+  requireAuth,
+  validate({ params: objectIdParam, body: rateSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const body = req.body as z.infer<typeof rateSchema>;
+    const rating = await upsertRating({
+      recipeId: id,
+      userId: user._id.toString(),
+      stars: body.stars,
+      note: body.note,
+      scheduleEntryId: body.scheduleEntryId,
+    });
+
+    res.status(200).json({ rating });
+  })
+);
+
+// DELETE /api/recipes/:id/rate — remove viewer's rating
+router.delete(
+  "/:id/rate",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    await deleteRating(id, user._id.toString());
+    res.status(200).json({ success: true });
+  })
+);
+
+// GET /api/recipes/:id/rating — aggregate + viewer's personal rating
+router.get(
+  "/:id/rating",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const aggregate = await getRatingAggregateForViewer({
+      userId: user._id.toString(),
+      recipeId: id,
+    });
+    res.status(200).json(aggregate);
   })
 );
 

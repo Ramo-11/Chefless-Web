@@ -17,6 +17,12 @@ export interface IScheduleEntry extends Document {
   status: "confirmed" | "suggested";
   suggestedBy?: Types.ObjectId;
   confirmedBy?: Types.ObjectId;
+  /**
+   * Timestamp when the user marked this entry as cooked. Null while pending.
+   * Orthogonal to `status` — a confirmed plan only becomes a cooked plan
+   * after the user acknowledges they actually made it.
+   */
+  cookedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,11 +87,19 @@ const scheduleEntrySchema = new Schema<IScheduleEntry>(
       type: Schema.Types.ObjectId,
       ref: "User",
     },
+    cookedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// Lets the cook-prompt surfacer cheaply find "entries past their date that
+// haven't been cooked yet" per user.
+scheduleEntrySchema.index({ userId: 1, cookedAt: 1, date: 1 });
 
 // Compound index for querying entries by kitchen and date range
 scheduleEntrySchema.index({ kitchenId: 1, date: 1 });

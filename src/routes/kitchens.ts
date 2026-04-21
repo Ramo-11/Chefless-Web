@@ -59,6 +59,7 @@ const updateKitchenSchema = z.object({
   photo: z.string().url().optional(),
   isPublic: z.boolean().optional(),
   scheduleAddPolicy: z.enum(["lead_only", "all"]).optional(),
+  ratingsVisibility: z.enum(["public", "kitchen_only", "off"]).optional(),
 });
 
 const joinKitchenSchema = z.object({

@@ -36,6 +36,7 @@ import promoCodesRouter from "./routes/promo-codes";
 import adminRouter from "./admin/routes";
 import pagesRouter from "./routes/pages";
 import blocksRouter from "./routes/blocks";
+import cookPromptsRouter from "./routes/cook-prompts";
 
 const app = express();
 
@@ -152,6 +153,7 @@ app.use("/api/feedback", jsonDefault, strictLimiter, feedbackRouter);
 app.use("/api/ai", jsonDefault, strictLimiter, aiRouter);
 app.use("/api/promo-codes", jsonDefault, ...apiLimiters, promoCodesRouter);
 app.use("/api/blocks", jsonDefault, ...apiLimiters, blocksRouter);
+app.use("/api/cook-prompts", jsonDefault, ...apiLimiters, cookPromptsRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);

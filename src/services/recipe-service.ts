@@ -3,6 +3,7 @@ import Recipe, { IRecipe, IIngredient, IStep } from "../models/Recipe";
 import Like from "../models/Like";
 import SavedRecipe from "../models/SavedRecipe";
 import RecipeShare from "../models/RecipeShare";
+import RecipeRating from "../models/RecipeRating";
 import User, { IUser } from "../models/User";
 import { canViewRecipe } from "./visibility-service";
 import { uploadImage } from "../lib/cloudinary";
@@ -86,6 +87,65 @@ interface PaginatedRecipes {
   limit: number;
   total: number;
   totalPages: number;
+}
+
+/**
+ * Hydrates a list of lean recipe documents with per-viewer fields
+ * (`isLiked`, `isSaved`) plus author display info. Without this, clients
+ * fall back to `isLiked ?? false` on every refresh and the heart/bookmark
+ * state resets even though the backend has the record.
+ *
+ * Single round-trip: one Like query, one SavedRecipe query, one User query.
+ */
+export async function hydrateListForViewer(
+  recipes: IRecipe[],
+  viewerId: string | Types.ObjectId | null,
+  overrides: { allLiked?: boolean; allSaved?: boolean } = {}
+): Promise<IRecipe[]> {
+  if (recipes.length === 0) return recipes;
+
+  const viewerOid = viewerId
+    ? typeof viewerId === "string"
+      ? new Types.ObjectId(viewerId)
+      : viewerId
+    : null;
+
+  const recipeIds = recipes.map((r) => r._id);
+  const authorIds = [
+    ...new Set(recipes.map((r) => r.authorId.toString())),
+  ].map((id) => new Types.ObjectId(id));
+
+  const [likes, saves, authors] = await Promise.all([
+    viewerOid && !overrides.allLiked
+      ? Like.find({ userId: viewerOid, recipeId: { $in: recipeIds } })
+          .select("recipeId")
+          .lean()
+      : Promise.resolve([]),
+    viewerOid && !overrides.allSaved
+      ? SavedRecipe.find({ userId: viewerOid, recipeId: { $in: recipeIds } })
+          .select("recipeId")
+          .lean()
+      : Promise.resolve([]),
+    User.find({ _id: { $in: authorIds } })
+      .select("fullName profilePicture")
+      .lean(),
+  ]);
+
+  const likedSet = new Set(likes.map((l) => l.recipeId.toString()));
+  const savedSet = new Set(saves.map((s) => s.recipeId.toString()));
+  const authorMap = new Map(authors.map((a) => [a._id.toString(), a]));
+
+  return recipes.map((recipe) => {
+    const id = recipe._id.toString();
+    const author = authorMap.get(recipe.authorId.toString());
+    return {
+      ...recipe,
+      authorName: author?.fullName,
+      authorPhoto: author?.profilePicture ?? null,
+      isLiked: overrides.allLiked ? true : likedSet.has(id),
+      isSaved: overrides.allSaved ? true : savedSet.has(id),
+    } as unknown as IRecipe;
+  });
 }
 
 // --- Helpers ---
@@ -412,6 +472,9 @@ export async function deleteRecipe(
     Like.deleteMany({ recipeId: recipe._id }),
     SavedRecipe.deleteMany({ recipeId: recipe._id }),
     RecipeShare.deleteMany({ recipeId: recipe._id }),
+    // Ratings cascade away with the recipe — preserving them would leave
+    // orphans pointing at a deleted recipeId.
+    RecipeRating.deleteMany({ recipeId: recipe._id }),
     Recipe.updateMany(
       { "forkedFrom.recipeId": recipe._id },
       { $set: { "forkedFrom.recipeId": null, "forkedFrom.authorId": null } }
@@ -475,8 +538,10 @@ export async function listMyRecipes(
     Recipe.countDocuments(query),
   ]);
 
+  const hydrated = await hydrateListForViewer(data, userId);
+
   return {
-    data,
+    data: hydrated,
     page,
     limit,
     total,
@@ -761,8 +826,12 @@ export async function listLikedRecipes(
     .map((id) => recipeMap.get(id.toString()))
     .filter((r): r is IRecipe => r !== undefined);
 
+  const hydrated = await hydrateListForViewer(orderedRecipes, userId, {
+    allLiked: true,
+  });
+
   return {
-    data: orderedRecipes,
+    data: hydrated,
     page,
     limit,
     total,
@@ -864,8 +933,12 @@ export async function listSavedRecipes(
     .map((id) => recipeMap.get(id.toString()))
     .filter((r): r is IRecipe => r !== undefined);
 
+  const hydrated = await hydrateListForViewer(orderedRecipes, userId, {
+    allSaved: true,
+  });
+
   return {
-    data: orderedRecipes,
+    data: hydrated,
     page,
     limit,
     total,
@@ -893,8 +966,10 @@ export async function listForkedRecipes(
     Recipe.countDocuments(query),
   ]);
 
+  const hydrated = await hydrateListForViewer(data, userId);
+
   return {
-    data,
+    data: hydrated,
     page,
     limit,
     total,

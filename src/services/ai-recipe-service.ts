@@ -46,25 +46,56 @@ function getClient(): Anthropic {
   return new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 }
 
-function utcDayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+export type AiFeature = "generate" | "substitutions" | "format";
+
+/**
+ * Returns today's date as `YYYY-MM-DD` at [offsetMinutes] east of UTC
+ * (Dart's `DateTime.timeZoneOffset.inMinutes`). Falls back to UTC when the
+ * offset is missing. Never throws so bad client data can't wedge the quota.
+ */
+function localDayKey(offsetMinutes?: number | null): string {
+  if (offsetMinutes == null || !Number.isFinite(offsetMinutes)) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  const localMs = Date.now() + offsetMinutes * 60_000;
+  return new Date(localMs).toISOString().slice(0, 10);
 }
 
-export async function getAiUsage(userId: string): Promise<{ used: number; limit: number }> {
-  const day = utcDayKey();
+function normalizeOffset(
+  raw: number | null | undefined
+): number | undefined {
+  if (raw == null || !Number.isFinite(raw)) return undefined;
+  // Sanity-clip to `-14*60..14*60` (no inhabited zone is outside Etc/GMT±14).
+  const clipped = Math.round(raw);
+  if (clipped < -840 || clipped > 840) return undefined;
+  return clipped;
+}
+
+export async function getAiUsage(
+  userId: string,
+  offsetOverride?: number | null
+): Promise<{ used: number; limit: number }> {
   const user = await User.findById(userId)
-    .select("aiRecipeHelperUsageDay aiRecipeHelperUsageCount")
+    .select(
+      "aiRecipeHelperUsageDay aiRecipeHelperUsageCount timezoneOffsetMinutes"
+    )
     .lean();
   if (!user) {
     throw createError("User not found", 404);
   }
+  const offset =
+    normalizeOffset(offsetOverride) ?? user.timezoneOffsetMinutes ?? undefined;
+  const day = localDayKey(offset);
   const used =
     user.aiRecipeHelperUsageDay === day ? user.aiRecipeHelperUsageCount ?? 0 : 0;
   return { used, limit: AI_DAILY_LIMIT };
 }
 
-export async function assertAiQuota(userId: string): Promise<void> {
-  const { used, limit } = await getAiUsage(userId);
+export async function assertAiQuota(
+  userId: string,
+  offsetOverride?: number | null
+): Promise<void> {
+  const { used, limit } = await getAiUsage(userId, offsetOverride);
   if (used >= limit) {
     throw createError(
       `Daily AI limit reached (${limit} uses). Try again tomorrow.`,
@@ -73,17 +104,67 @@ export async function assertAiQuota(userId: string): Promise<void> {
   }
 }
 
-export async function recordAiUsage(userId: string): Promise<void> {
-  const day = utcDayKey();
-  const user = await User.findById(userId).select(
-    "aiRecipeHelperUsageDay aiRecipeHelperUsageCount"
-  );
-  if (!user) return;
-  const count =
-    user.aiRecipeHelperUsageDay === day ? user.aiRecipeHelperUsageCount ?? 0 : 0;
-  user.aiRecipeHelperUsageDay = day;
-  user.aiRecipeHelperUsageCount = count + 1;
-  await user.save();
+/**
+ * Increments the user's daily + lifetime + per-feature AI counters and
+ * stamps `aiLastUsedAt`. Also persists the client-supplied timezone offset
+ * so the user record reflects their last-seen zone without a separate
+ * endpoint.
+ *
+ * Rolls the daily counter over to `1` when the user's local day has changed;
+ * otherwise `$inc`s it. Uses atomic updates so concurrent AI calls don't
+ * lose increments the way a read-modify-write `.save()` loop would.
+ */
+export async function recordAiUsage(
+  userId: string,
+  feature: AiFeature,
+  offsetOverride?: number | null
+): Promise<void> {
+  const existing = await User.findById(userId)
+    .select("aiRecipeHelperUsageDay timezoneOffsetMinutes")
+    .lean();
+
+  const offset =
+    normalizeOffset(offsetOverride) ?? existing?.timezoneOffsetMinutes ?? undefined;
+  const day = localDayKey(offset);
+
+  const featureField =
+    feature === "generate"
+      ? "aiGenerateCount"
+      : feature === "substitutions"
+      ? "aiSubstitutionsCount"
+      : "aiFormatCount";
+
+  const rolledOver = existing?.aiRecipeHelperUsageDay !== day;
+
+  const setFields: Record<string, unknown> = {
+    aiLastUsedAt: new Date(),
+    aiRecipeHelperUsageDay: day,
+  };
+  const normalizedOverride = normalizeOffset(offsetOverride);
+  if (normalizedOverride !== undefined) {
+    setFields.timezoneOffsetMinutes = normalizedOverride;
+  }
+
+  const incFields: Record<string, number> = {
+    aiTotalMessagesSent: 1,
+    [featureField]: 1,
+  };
+
+  if (rolledOver) {
+    // New local day — reset the daily counter to exactly 1 (this call).
+    await User.updateOne(
+      { _id: userId },
+      { $set: { ...setFields, aiRecipeHelperUsageCount: 1 }, $inc: incFields }
+    );
+  } else {
+    await User.updateOne(
+      { _id: userId },
+      {
+        $set: setFields,
+        $inc: { ...incFields, aiRecipeHelperUsageCount: 1 },
+      }
+    );
+  }
 }
 
 function extractJsonObject(text: string): string {

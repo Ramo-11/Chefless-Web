@@ -26,6 +26,13 @@ export interface IKitchen extends Document {
    * - `"all"`: any kitchen member adds entries directly (confirmed).
    */
   scheduleAddPolicy: "lead_only" | "all";
+  /**
+   * Controls visibility of member ratings on recipes cooked through this kitchen.
+   * - `"public"`: ratings feed the recipe's global `avgRating` and are visible to anyone.
+   * - `"kitchen_only"`: ratings only power the kitchen's internal aggregate; the public stays at zero.
+   * - `"off"`: rating prompts are disabled entirely for this kitchen.
+   */
+  ratingsVisibility: "public" | "kitchen_only" | "off";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,6 +95,11 @@ const kitchenSchema = new Schema<IKitchen>(
       type: String,
       enum: ["lead_only", "all"],
       default: "lead_only",
+    },
+    ratingsVisibility: {
+      type: String,
+      enum: ["public", "kitchen_only", "off"],
+      default: "kitchen_only",
     },
   },
   {

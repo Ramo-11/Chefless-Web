@@ -254,6 +254,16 @@
     adminFetch('/admin/api/users/' + id)
       .then(data => {
         const u = data.user;
+        const ai = data.ai || {};
+        const offsetLabel = (() => {
+          const m = ai.timezoneOffsetMinutes;
+          if (m == null) return 'Unknown';
+          const sign = m >= 0 ? '+' : '-';
+          const abs = Math.abs(m);
+          const h = String(Math.floor(abs / 60)).padStart(2, '0');
+          const mm = String(abs % 60).padStart(2, '0');
+          return `UTC${sign}${h}:${mm}`;
+        })();
         document.getElementById('user-detail-body').innerHTML = `
           <div class="detail-grid">
             <div class="detail-header">
@@ -276,6 +286,17 @@
               <div class="detail-row"><span>Status:</span> <span>${u.isBanned ? '<span class="badge badge-danger">Banned</span>' : '<span class="badge badge-success">Active</span>'}</span></div>
               <div class="detail-row"><span>Joined:</span> <span>${new Date(u.createdAt).toLocaleDateString()}</span></div>
               <div class="detail-row"><span>Last Active:</span> <span>${u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleDateString() : 'N/A'}</span></div>
+            </div>
+            <div class="detail-section">
+              <h4>AI Recipe Helper</h4>
+              <div class="detail-row"><span>Today:</span> <span>${Number(ai.usedToday) || 0} / ${Number(ai.limit) || 20}</span></div>
+              <div class="detail-row"><span>Lifetime total:</span> <span>${Number(ai.totalMessagesSent) || 0}</span></div>
+              <div class="detail-row"><span>— Generate:</span> <span>${Number(ai.generateCount) || 0}</span></div>
+              <div class="detail-row"><span>— Substitutions:</span> <span>${Number(ai.substitutionsCount) || 0}</span></div>
+              <div class="detail-row"><span>— Format notes:</span> <span>${Number(ai.formatCount) || 0}</span></div>
+              <div class="detail-row"><span>Last used:</span> <span>${ai.lastUsedAt ? new Date(ai.lastUsedAt).toLocaleString() : 'Never'}</span></div>
+              <div class="detail-row"><span>Current local day:</span> <span>${ai.dayKey ? esc(ai.dayKey) : '—'}</span></div>
+              <div class="detail-row"><span>Timezone:</span> <span>${esc(offsetLabel)}</span></div>
             </div>
             ${u.dietaryPreferences?.length ? `<div class="detail-section"><h4>Dietary Preferences</h4><div class="tag-list">${u.dietaryPreferences.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</div></div>` : ''}
             ${u.cuisinePreferences?.length ? `<div class="detail-section"><h4>Cuisine Preferences</h4><div class="tag-list">${u.cuisinePreferences.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</div></div>` : ''}

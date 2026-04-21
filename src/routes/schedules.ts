@@ -14,6 +14,10 @@ import {
   denySuggestion,
   importToKitchen,
 } from "../services/schedule-service";
+import {
+  markEntryCooked,
+  clearEntryCooked,
+} from "../services/rating-service";
 
 const router = Router();
 
@@ -311,6 +315,59 @@ router.delete(
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     await deleteEntry(currentUser._id.toString(), id);
+
+    res.status(200).json({ success: true });
+  })
+);
+
+// PATCH /api/schedule/:id/cooked — mark a scheduled meal as cooked
+const markCookedSchema = z.object({
+  cookedAt: z
+    .string()
+    .datetime({ message: "cookedAt must be an ISO-8601 timestamp" })
+    .optional(),
+});
+
+router.patch(
+  "/:id/cooked",
+  requireAuth,
+  validate({ params: objectIdParam, body: markCookedSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id")
+      .lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const body = req.body as z.infer<typeof markCookedSchema>;
+    const cookedAt = body.cookedAt ? new Date(body.cookedAt) : undefined;
+    await markEntryCooked(currentUser._id.toString(), id, cookedAt);
+
+    res.status(200).json({ success: true });
+  })
+);
+
+// DELETE /api/schedule/:id/cooked — undo the cooked mark
+router.delete(
+  "/:id/cooked",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id")
+      .lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    await clearEntryCooked(currentUser._id.toString(), id);
 
     res.status(200).json({ success: true });
   })

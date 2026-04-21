@@ -147,6 +147,7 @@ export async function updateKitchen(
     photo?: string;
     isPublic?: boolean;
     scheduleAddPolicy?: "lead_only" | "all";
+    ratingsVisibility?: "public" | "kitchen_only" | "off";
   }
 ): Promise<IKitchen> {
   const user = await User.findById(userId).select("kitchenId").lean();
@@ -169,6 +170,9 @@ export async function updateKitchen(
   if (updates.isPublic !== undefined) updateFields.isPublic = updates.isPublic;
   if (updates.scheduleAddPolicy !== undefined) {
     updateFields.scheduleAddPolicy = updates.scheduleAddPolicy;
+  }
+  if (updates.ratingsVisibility !== undefined) {
+    updateFields.ratingsVisibility = updates.ratingsVisibility;
   }
 
   const updated = await Kitchen.findByIdAndUpdate(
