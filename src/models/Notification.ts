@@ -17,6 +17,8 @@ export const NOTIFICATION_TYPES = [
   "kitchen_invite_declined", // Sent to the sender when recipient declines
   "kitchen_joined",
   "kitchen_removed",
+  "recipe_cooked", // Someone posted an "I Cooked It" photo of your recipe
+  "passport_stamp", // You unlocked a new country/region stamp
   "system",
 ] as const;
 

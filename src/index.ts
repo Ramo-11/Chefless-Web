@@ -37,6 +37,10 @@ import adminRouter from "./admin/routes";
 import pagesRouter from "./routes/pages";
 import blocksRouter from "./routes/blocks";
 import cookPromptsRouter from "./routes/cook-prompts";
+import cookedPostsRouter from "./routes/cooked-posts";
+import passportRouter from "./routes/passport";
+import remixTreeRouter from "./routes/remix-tree";
+import wrappedRouter from "./routes/wrapped";
 
 const app = express();
 
@@ -154,6 +158,11 @@ app.use("/api/ai", jsonDefault, strictLimiter, aiRouter);
 app.use("/api/promo-codes", jsonDefault, ...apiLimiters, promoCodesRouter);
 app.use("/api/blocks", jsonDefault, ...apiLimiters, blocksRouter);
 app.use("/api/cook-prompts", jsonDefault, ...apiLimiters, cookPromptsRouter);
+// Cooked-posts endpoints accept base64 photos, so use the larger body limit.
+app.use("/api/cooked-posts", jsonUpload, ...apiLimiters, cookedPostsRouter);
+app.use("/api/passport", jsonDefault, ...apiLimiters, passportRouter);
+app.use("/api/remix-tree", jsonDefault, ...apiLimiters, remixTreeRouter);
+app.use("/api/wrapped", jsonDefault, ...apiLimiters, wrappedRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);

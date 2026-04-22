@@ -26,6 +26,8 @@ export interface NotificationPreferences {
   kitchen_invite_declined: boolean;
   kitchen_joined: boolean;
   kitchen_removed: boolean;
+  recipe_cooked: boolean;
+  passport_stamp: boolean;
   system: boolean;
 }
 
@@ -46,6 +48,8 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   kitchen_invite_declined: true,
   kitchen_joined: true,
   kitchen_removed: true,
+  recipe_cooked: true,
+  passport_stamp: true,
   system: true,
 };
 
@@ -211,6 +215,8 @@ const userSchema = new Schema<IUser>(
         kitchen_invite_declined: { type: Boolean, default: true },
         kitchen_joined: { type: Boolean, default: true },
         kitchen_removed: { type: Boolean, default: true },
+        recipe_cooked: { type: Boolean, default: true },
+        passport_stamp: { type: Boolean, default: true },
         system: { type: Boolean, default: true },
       },
       default: () => ({ ...DEFAULT_NOTIFICATION_PREFERENCES }),

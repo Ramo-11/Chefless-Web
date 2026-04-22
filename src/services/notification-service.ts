@@ -48,7 +48,10 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
     case "recipe_forked":
     case "recipe_saved":
     case "recipe_shared":
+    case "recipe_cooked":
       return params.recipeId ? `/recipe/${params.recipeId}` : null;
+    case "passport_stamp":
+      return "/passport";
     case "new_follower":
     case "follow_request":
     case "follow_accepted":
@@ -717,5 +720,73 @@ export async function notifyKitchenInviteDeclined(
     kitchenName: kitchen.name,
     pushTitle: "Invite declined",
     pushBody: `${actor.fullName} declined your kitchen invite.`,
+  });
+}
+
+// ── "I Cooked It" notifications ─────────────────────────────────────────
+
+/**
+ * Notify a recipe's author that someone posted an "I Cooked It" for it.
+ * No-op when the actor is the author (silent self-notifications).
+ */
+export async function notifyRecipeCooked(params: {
+  actorId: string;
+  recipeId: string;
+  recipeTitle: string;
+  recipeAuthorId: string;
+  photoUrl?: string;
+}): Promise<void> {
+  if (params.actorId === params.recipeAuthorId) return;
+
+  const actor = await getActorData(params.actorId);
+  if (!actor) return;
+
+  await createNotification({
+    userId: new Types.ObjectId(params.recipeAuthorId),
+    type: "recipe_cooked",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    recipeId: new Types.ObjectId(params.recipeId),
+    recipeTitle: params.recipeTitle,
+    pushTitle: "Someone cooked your recipe",
+    pushBody: `${actor.fullName} cooked "${params.recipeTitle}".`,
+  });
+}
+
+/**
+ * Notify a user they just unlocked a new passport stamp (first time cooking
+ * a given cuisine). Stored as a type=passport_stamp notification with the
+ * cuisine name stashed in `shareMessage` so existing schema reuse applies.
+ */
+export async function notifyPassportStamp(params: {
+  userId: string;
+  cuisine: string;
+  regionName: string | null;
+}): Promise<void> {
+  const suffix = params.regionName ? ` · ${params.regionName}` : "";
+  await createNotification({
+    userId: new Types.ObjectId(params.userId),
+    type: "passport_stamp",
+    shareMessage: params.cuisine,
+    pushTitle: "New passport stamp",
+    pushBody: `Unlocked ${params.cuisine}${suffix}. Tap to see your passport.`,
+  });
+}
+
+/**
+ * Notify a user they just earned a passport badge (tier or regional).
+ * Badge identifier is stashed in `shareMessage`.
+ */
+export async function notifyPassportBadge(params: {
+  userId: string;
+  badgeId: string;
+}): Promise<void> {
+  await createNotification({
+    userId: new Types.ObjectId(params.userId),
+    type: "passport_stamp",
+    shareMessage: `badge:${params.badgeId}`,
+    pushTitle: "Badge unlocked",
+    pushBody: "You earned a new Chefless passport badge.",
   });
 }
