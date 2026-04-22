@@ -6,6 +6,7 @@ import { validate } from "../middleware/validate";
 import { strictLimiter, joinKitchenLimiter } from "../middleware/rateLimit";
 import User from "../models/User";
 import Kitchen from "../models/Kitchen";
+import ScheduleEntry from "../models/ScheduleEntry";
 import {
   createKitchen,
   getMyKitchen,
@@ -475,6 +476,13 @@ const customSlotsSchema = z.object({
   customMealSlots: z
     .array(z.string().min(1).max(50).trim())
     .max(20, { message: "Maximum 20 custom meal slots" }),
+  /**
+   * When true, the server cascade-deletes any schedule entries still using
+   * a slot that's being removed. When false (default), the server rejects
+   * the request with 409 if any removal would orphan meals — the client
+   * must re-submit with force=true after the user confirms.
+   */
+  force: z.boolean().optional(),
 });
 
 // GET /api/kitchens/slots — Get the kitchen's custom meal slots
@@ -545,20 +553,81 @@ router.put(
       return;
     }
 
-    const { customMealSlots } = req.body as z.infer<typeof customSlotsSchema>;
+    const { customMealSlots, force } = req.body as z.infer<
+      typeof customSlotsSchema
+    >;
 
-    // Deduplicate and normalise to lowercase for consistent matching
+    // Deduplicate and normalise (trim only — slot names preserve the lead's
+    // chosen casing, e.g. "Pre-Workout").
     const normalised = [
       ...new Set(customMealSlots.map((s) => s.trim())),
     ].filter((s) => s.length > 0);
 
+    // ── Compute which slots are being removed ────────────────────────
+    const previous = await Kitchen.findById(currentUser.kitchenId)
+      .select("customMealSlots")
+      .lean();
+    const previousSlots = previous?.customMealSlots ?? [];
+    const normalisedSet = new Set(normalised.map((s) => s.toLowerCase()));
+    const removedSlots = previousSlots.filter(
+      (s) => !normalisedSet.has(s.toLowerCase())
+    );
+
+    // ── Preflight: count affected schedule entries per removed slot ──
+    let affectedCount = 0;
+    const affectedBySlot: Record<string, number> = {};
+    if (removedSlots.length > 0) {
+      for (const slot of removedSlots) {
+        const count = await ScheduleEntry.countDocuments({
+          kitchenId: currentUser.kitchenId,
+          mealSlot: slot,
+        });
+        affectedBySlot[slot] = count;
+        affectedCount += count;
+      }
+    }
+
+    // If removing a slot would orphan meals and the caller hasn't opted in
+    // to cascade deletion, reject with 409 so the client can surface a
+    // clearer confirmation to the user.
+    if (affectedCount > 0 && force !== true) {
+      res.status(409).json({
+        error:
+          `${affectedCount} meal${affectedCount === 1 ? " is" : "s are"} ` +
+          `planned in ${removedSlots.length === 1 ? "this slot" : "these slots"}. ` +
+          "Re-submit with force=true to delete them.",
+        needsConfirmation: true,
+        affectedCount,
+        removedSlots,
+        affectedBySlot,
+      });
+      return;
+    }
+
+    // Save the new slot list first. If the subsequent cascade-delete fails,
+    // the orphaned entries stay invisible (since their slot is no longer in
+    // the list) and a retry will clean them up. Reversing this order risks
+    // deleting entries then failing to save, which would be worse.
     const updated = await Kitchen.findByIdAndUpdate(
       currentUser.kitchenId,
       { customMealSlots: normalised },
       { new: true, select: "customMealSlots" }
     ).lean();
 
-    res.status(200).json({ customMealSlots: updated?.customMealSlots ?? [] });
+    let deletedEntries = 0;
+    if (removedSlots.length > 0 && affectedCount > 0) {
+      const deleteResult = await ScheduleEntry.deleteMany({
+        kitchenId: currentUser.kitchenId,
+        mealSlot: { $in: removedSlots },
+      });
+      deletedEntries = deleteResult.deletedCount ?? 0;
+    }
+
+    res.status(200).json({
+      customMealSlots: updated?.customMealSlots ?? [],
+      deletedEntries,
+      removedSlots,
+    });
   })
 );
 
