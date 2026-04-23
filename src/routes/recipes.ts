@@ -27,6 +27,7 @@ import {
   upsertRating,
   deleteRating,
   getRatingAggregateForViewer,
+  getKitchenCookHistoryForRecipe,
 } from "../services/rating-service";
 import { importRecipeFromUrl } from "../services/recipe-import-service";
 
@@ -559,6 +560,30 @@ router.get(
       recipeId: id,
     });
     res.status(200).json(aggregate);
+  })
+);
+
+// GET /api/recipes/:id/kitchen-cook-history — prior cook + rating stats for
+// this recipe within the viewer's kitchen. Drives the "last time your family
+// rated this" nudge shown when scheduling a previously-cooked recipe.
+router.get(
+  "/:id/kitchen-cook-history",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const history = await getKitchenCookHistoryForRecipe(
+      user._id.toString(),
+      id
+    );
+    res.status(200).json(history);
   })
 );
 

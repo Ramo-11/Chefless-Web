@@ -144,6 +144,16 @@ export async function addEntry(
   const status =
     kitchen.scheduleAddPolicy === "all" || canEdit ? "confirmed" : "suggested";
 
+  // If the kitchen lead has disabled member suggestions, non-editor members
+  // cannot queue up proposals. Editors and the lead bypass this because their
+  // entries are confirmed outright (above), not suggested.
+  if (status === "suggested" && kitchen.allowMemberSuggestions === false) {
+    throw createError(
+      "The kitchen lead has turned off member suggestions.",
+      403
+    );
+  }
+
   const entryFields: Record<string, unknown> = {
     kitchenId: new Types.ObjectId(kitchenId),
     userId: new Types.ObjectId(userId),
@@ -588,6 +598,13 @@ export async function importToKitchen(
   const canEdit = hasScheduleEditPermission(userId, kitchen);
   const status =
     kitchen.scheduleAddPolicy === "all" || canEdit ? "confirmed" : "suggested";
+
+  if (status === "suggested" && kitchen.allowMemberSuggestions === false) {
+    throw createError(
+      "The kitchen lead has turned off member suggestions.",
+      403
+    );
+  }
 
   const kitchenEntries = personalEntries.map((entry) => ({
     kitchenId: new Types.ObjectId(kitchenId),

@@ -33,6 +33,26 @@ export interface IKitchen extends Document {
    * - `"off"`: rating prompts are disabled entirely for this kitchen.
    */
   ratingsVisibility: "public" | "kitchen_only" | "off";
+  /**
+   * When true (default) and `isPublic` is true, non-member discoverers see the
+   * member list on the public kitchen view. When false, the member count is
+   * still shown but individual names/avatars are hidden. Private kitchens
+   * never expose members to non-members regardless of this flag.
+   */
+  showMembersPublicly: boolean;
+  /**
+   * When false, members who are not in `membersWithScheduleEdit` cannot
+   * propose meals to the kitchen schedule. The lead (and editors) can still
+   * add directly. Independent of `scheduleAddPolicy` — this closes the
+   * "suggest" escape hatch entirely.
+   */
+  allowMemberSuggestions: boolean;
+  /**
+   * When false, AI-powered weekly plan suggestions are disabled for the
+   * kitchen. Currently reserved for the upcoming smart-planner feature;
+   * persisted now so the lead can opt out before rollout.
+   */
+  allowAutoScheduleSuggestions: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -100,6 +120,18 @@ const kitchenSchema = new Schema<IKitchen>(
       type: String,
       enum: ["public", "kitchen_only", "off"],
       default: "kitchen_only",
+    },
+    showMembersPublicly: {
+      type: Boolean,
+      default: true,
+    },
+    allowMemberSuggestions: {
+      type: Boolean,
+      default: true,
+    },
+    allowAutoScheduleSuggestions: {
+      type: Boolean,
+      default: true,
     },
   },
   {

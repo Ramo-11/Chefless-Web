@@ -344,3 +344,62 @@ export async function clearEntryCooked(
   entry.cookedAt = null;
   await entry.save();
 }
+
+export interface KitchenCookHistory {
+  /** Aggregate stars across every prior rating of this recipe within the kitchen. */
+  avg: number;
+  /** How many member ratings are feeding `avg`. */
+  count: number;
+  /** Date the recipe was last marked cooked in this kitchen, if ever. */
+  lastCookedAt: Date | null;
+}
+
+/**
+ * Prior cook + rating history for `recipeId` within the viewer's current
+ * kitchen. Powers the "last time your family rated this 4.5" hint that surfaces
+ * when someone schedules a recipe the kitchen has cooked before.
+ *
+ * Returns `{ avg: 0, count: 0, lastCookedAt: null }` for solo cooks (no
+ * kitchen) or when the recipe hasn't been cooked here yet — so the client
+ * can call this unconditionally and decide whether to show the hint.
+ */
+export async function getKitchenCookHistoryForRecipe(
+  userId: string,
+  recipeId: string
+): Promise<KitchenCookHistory> {
+  const recipeOid = new Types.ObjectId(recipeId);
+  const user = await User.findById(userId).select("kitchenId").lean();
+  const kitchenId = user?.kitchenId ?? null;
+
+  if (!kitchenId) {
+    return { avg: 0, count: 0, lastCookedAt: null };
+  }
+
+  const [aggRow, lastEntry] = await Promise.all([
+    RecipeRating.aggregate([
+      { $match: { recipeId: recipeOid, kitchenId } },
+      {
+        $group: {
+          _id: "$recipeId",
+          avg: { $avg: "$stars" },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+    ScheduleEntry.findOne({
+      kitchenId,
+      recipeId: recipeOid,
+      cookedAt: { $ne: null },
+    })
+      .sort({ cookedAt: -1 })
+      .select("cookedAt")
+      .lean(),
+  ]);
+
+  const row = aggRow[0] as { avg?: number; count?: number } | undefined;
+  const avg = row?.avg ? Number(row.avg.toFixed(2)) : 0;
+  const count = row?.count ?? 0;
+  const lastCookedAt = lastEntry?.cookedAt ?? null;
+
+  return { avg, count, lastCookedAt };
+}

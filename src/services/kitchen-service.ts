@@ -3,9 +3,10 @@ import { randomInt } from "crypto";
 import Kitchen, { IKitchen } from "../models/Kitchen";
 import User, { IUser } from "../models/User";
 import Recipe, { IRecipe } from "../models/Recipe";
-import ScheduleEntry from "../models/ScheduleEntry";
+import ScheduleEntry, { IScheduleEntry } from "../models/ScheduleEntry";
 import ShoppingList from "../models/ShoppingList";
 import KitchenInvite, { IKitchenInvite } from "../models/KitchenInvite";
+import RecipeRating from "../models/RecipeRating";
 import {
   notifyKitchenInviteWelcome,
   notifyKitchenJoined,
@@ -148,6 +149,9 @@ export async function updateKitchen(
     isPublic?: boolean;
     scheduleAddPolicy?: "lead_only" | "all";
     ratingsVisibility?: "public" | "kitchen_only" | "off";
+    showMembersPublicly?: boolean;
+    allowMemberSuggestions?: boolean;
+    allowAutoScheduleSuggestions?: boolean;
   }
 ): Promise<IKitchen> {
   const user = await User.findById(userId).select("kitchenId").lean();
@@ -173,6 +177,16 @@ export async function updateKitchen(
   }
   if (updates.ratingsVisibility !== undefined) {
     updateFields.ratingsVisibility = updates.ratingsVisibility;
+  }
+  if (updates.showMembersPublicly !== undefined) {
+    updateFields.showMembersPublicly = updates.showMembersPublicly;
+  }
+  if (updates.allowMemberSuggestions !== undefined) {
+    updateFields.allowMemberSuggestions = updates.allowMemberSuggestions;
+  }
+  if (updates.allowAutoScheduleSuggestions !== undefined) {
+    updateFields.allowAutoScheduleSuggestions =
+      updates.allowAutoScheduleSuggestions;
   }
 
   const updated = await Kitchen.findByIdAndUpdate(
@@ -967,5 +981,290 @@ export async function getKitchenRecipes(
     limit,
     total,
     totalPages: Math.ceil(total / limit),
+  };
+}
+
+// ── Public kitchen discovery ───────────────────────────────────────────────
+
+export interface PublicKitchenView {
+  kitchen: IKitchen;
+  members: KitchenMember[] | null;
+  memberCount: number;
+  isMember: boolean;
+  isLead: boolean;
+  lead: KitchenMember | null;
+}
+
+/**
+ * Returns the discoverable representation of a kitchen for any signed-in user.
+ *
+ * Visibility rules:
+ * - If `isPublic` is true, anyone can see name/photo/memberCount/lead.
+ *   Members are exposed only when `showMembersPublicly` is true.
+ * - If `isPublic` is false, the only viewer allowed through is an actual
+ *   kitchen member; everyone else gets 404.
+ *
+ * The `isMember` / `isLead` booleans let the client decide whether to show
+ * member-only affordances (ratings history, schedule edits, etc.) without a
+ * second round-trip.
+ */
+export async function getPublicKitchen(
+  viewerId: string,
+  kitchenId: string
+): Promise<PublicKitchenView> {
+  if (!Types.ObjectId.isValid(kitchenId)) {
+    throw createError("Invalid kitchen id", 400);
+  }
+
+  const kitchen = await Kitchen.findById(kitchenId);
+  if (!kitchen) throw createError("Kitchen not found", 404);
+
+  const viewer = await User.findById(viewerId).select("kitchenId").lean();
+  const isMember = !!viewer?.kitchenId && viewer.kitchenId.equals(kitchen._id);
+  const isLead = kitchen.leadId.equals(viewerId);
+
+  if (!kitchen.isPublic && !isMember) {
+    // Preserve privacy — a private kitchen should be indistinguishable from
+    // a non-existent one to non-members.
+    throw createError("Kitchen not found", 404);
+  }
+
+  const leadUser = await User.findById(kitchen.leadId)
+    .select("fullName profilePicture recipesCount")
+    .lean<KitchenMember | null>();
+
+  const canSeeMembers = isMember || kitchen.showMembersPublicly;
+  let members: KitchenMember[] | null = null;
+
+  if (canSeeMembers) {
+    members = await User.find({ kitchenId: kitchen._id })
+      .select("fullName profilePicture recipesCount")
+      .lean<KitchenMember[]>();
+  }
+
+  return {
+    kitchen,
+    members,
+    memberCount: kitchen.memberCount,
+    isMember,
+    isLead,
+    lead: leadUser,
+  };
+}
+
+/**
+ * Returns upcoming + recent schedule entries for a kitchen's public view.
+ *
+ * Window: 7 days back through 21 days forward — enough to convey cadence to a
+ * curious non-member without dumping the kitchen's entire history. Respects
+ * the same visibility gate as `getPublicKitchen`.
+ */
+export async function getPublicKitchenSchedule(
+  viewerId: string,
+  kitchenId: string
+): Promise<IScheduleEntry[]> {
+  if (!Types.ObjectId.isValid(kitchenId)) {
+    throw createError("Invalid kitchen id", 400);
+  }
+
+  const kit = await Kitchen.findById(kitchenId)
+    .select("isPublic")
+    .lean();
+  if (!kit) throw createError("Kitchen not found", 404);
+
+  const viewer = await User.findById(viewerId).select("kitchenId").lean();
+  const isMember =
+    !!viewer?.kitchenId && viewer.kitchenId.equals(new Types.ObjectId(kitchenId));
+
+  if (!kit.isPublic && !isMember) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  const now = stripToUtcDay(new Date());
+  const from = new Date(now);
+  from.setUTCDate(from.getUTCDate() - 7);
+  const to = new Date(now);
+  to.setUTCDate(to.getUTCDate() + 21);
+
+  // Only confirmed entries in the public view — pending suggestions are
+  // internal to the kitchen and shouldn't leak to curious onlookers.
+  const baseStatusFilter = isMember
+    ? { status: { $in: ["confirmed", "suggested"] } }
+    : { status: "confirmed" };
+
+  const entries = await ScheduleEntry.find({
+    kitchenId: new Types.ObjectId(kitchenId),
+    date: { $gte: from, $lte: to },
+    ...baseStatusFilter,
+  })
+    .sort({ date: 1 })
+    .lean<IScheduleEntry[]>();
+
+  return entries;
+}
+
+/**
+ * Returns recipes discoverable through a public kitchen view. Same visibility
+ * gate as `getPublicKitchen`. For members this delegates to the existing
+ * `getKitchenRecipes`; for non-members we also limit to non-private recipes
+ * authored by members of this specific kitchen.
+ */
+export async function getPublicKitchenRecipes(
+  viewerId: string,
+  kitchenId: string,
+  page: number,
+  limit: number
+): Promise<PaginatedRecipes> {
+  if (!Types.ObjectId.isValid(kitchenId)) {
+    throw createError("Invalid kitchen id", 400);
+  }
+
+  const kit = await Kitchen.findById(kitchenId)
+    .select("isPublic")
+    .lean();
+  if (!kit) throw createError("Kitchen not found", 404);
+
+  const viewer = await User.findById(viewerId).select("kitchenId").lean();
+  const isMember =
+    !!viewer?.kitchenId && viewer.kitchenId.equals(new Types.ObjectId(kitchenId));
+
+  if (!kit.isPublic && !isMember) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  return getKitchenRecipes(kitchenId, page, limit);
+}
+
+function stripToUtcDay(d: Date): Date {
+  const x = new Date(d);
+  x.setUTCHours(0, 0, 0, 0);
+  return x;
+}
+
+// ── Kitchen ratings history ────────────────────────────────────────────────
+
+export interface KitchenRatingHistoryItem {
+  _id: string;
+  recipeId: string;
+  recipeTitle: string;
+  recipePhoto: string | null;
+  stars: number;
+  note: string | null;
+  cookedAt: Date;
+  ratedAt: Date;
+  rater: {
+    _id: string;
+    fullName: string;
+    profilePicture: string | null;
+  };
+}
+
+export interface KitchenRatingHistoryPage {
+  items: KitchenRatingHistoryItem[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+/**
+ * Returns every rating recorded by members of the viewer's kitchen. Members-
+ * only view: non-members throw 403. Joined against Recipe (title/photo) and
+ * User (rater name/avatar) once so the client renders in one pass.
+ */
+export async function getKitchenRatingsHistory(
+  userId: string,
+  page: number,
+  limit: number
+): Promise<KitchenRatingHistoryPage> {
+  const viewer = await User.findById(userId).select("kitchenId").lean();
+  if (!viewer?.kitchenId) {
+    throw createError("You are not in a kitchen", 400);
+  }
+
+  const kitchenId = viewer.kitchenId;
+  const skip = (page - 1) * limit;
+
+  const [raw, total] = await Promise.all([
+    RecipeRating.aggregate([
+      { $match: { kitchenId } },
+      { $sort: { ratedAt: -1 as const } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "recipes",
+          localField: "recipeId",
+          foreignField: "_id",
+          as: "_recipe",
+          pipeline: [{ $project: { title: 1, photos: 1 } }],
+        },
+      },
+      { $unwind: { path: "$_recipe", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "_user",
+          pipeline: [{ $project: { fullName: 1, profilePicture: 1 } }],
+        },
+      },
+      { $unwind: { path: "$_user", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          stars: 1,
+          note: 1,
+          cookedAt: 1,
+          ratedAt: 1,
+          recipeId: 1,
+          "_recipe.title": 1,
+          "_recipe.photos": 1,
+          "_user._id": 1,
+          "_user.fullName": 1,
+          "_user.profilePicture": 1,
+        },
+      },
+    ]),
+    RecipeRating.countDocuments({ kitchenId }),
+  ]);
+
+  interface RawRow {
+    _id: Types.ObjectId;
+    recipeId: Types.ObjectId;
+    stars: number;
+    note?: string;
+    cookedAt: Date;
+    ratedAt: Date;
+    _recipe?: { title?: string; photos?: string[] };
+    _user?: {
+      _id: Types.ObjectId;
+      fullName?: string;
+      profilePicture?: string;
+    };
+  }
+
+  const items: KitchenRatingHistoryItem[] = (raw as RawRow[]).map((r) => ({
+    _id: r._id.toString(),
+    recipeId: r.recipeId.toString(),
+    recipeTitle: r._recipe?.title ?? "Untitled recipe",
+    recipePhoto: r._recipe?.photos?.[0] ?? null,
+    stars: r.stars,
+    note: r.note ?? null,
+    cookedAt: r.cookedAt,
+    ratedAt: r.ratedAt,
+    rater: {
+      _id: r._user?._id?.toString() ?? "",
+      fullName: r._user?.fullName ?? "A kitchen member",
+      profilePicture: r._user?.profilePicture ?? null,
+    },
+  }));
+
+  return {
+    items,
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
   };
 }

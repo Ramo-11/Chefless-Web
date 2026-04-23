@@ -24,6 +24,10 @@ import {
   declineKitchenInvite,
   listPendingInvitesForRecipient,
   cancelKitchenInvite,
+  getPublicKitchen,
+  getPublicKitchenSchedule,
+  getPublicKitchenRecipes,
+  getKitchenRatingsHistory,
   INVITE_CODE_REGEX,
 } from "../services/kitchen-service";
 
@@ -61,6 +65,9 @@ const updateKitchenSchema = z.object({
   isPublic: z.boolean().optional(),
   scheduleAddPolicy: z.enum(["lead_only", "all"]).optional(),
   ratingsVisibility: z.enum(["public", "kitchen_only", "off"]).optional(),
+  showMembersPublicly: z.boolean().optional(),
+  allowMemberSuggestions: z.boolean().optional(),
+  allowAutoScheduleSuggestions: z.boolean().optional(),
 });
 
 const joinKitchenSchema = z.object({
@@ -627,6 +634,119 @@ router.put(
       customMealSlots: updated?.customMealSlots ?? [],
       deletedEntries,
       removedSlots,
+    });
+  })
+);
+
+// --- Members' shared rating history ---
+
+// GET /api/kitchens/ratings-history — full rating history for the viewer's
+// kitchen. Members-only: non-members get 400 from the service.
+//
+// IMPORTANT: must be declared BEFORE the `/:id` route below so Express doesn't
+// try to interpret "ratings-history" as a kitchen id param.
+router.get(
+  "/ratings-history",
+  requireAuth,
+  validate({ query: paginationSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { page, limit } = req.query as unknown as z.infer<
+      typeof paginationSchema
+    >;
+    const result = await getKitchenRatingsHistory(
+      currentUser._id.toString(),
+      page,
+      limit
+    );
+
+    res.status(200).json(result);
+  })
+);
+
+// --- Public kitchen discovery ---
+
+// GET /api/kitchens/:id — discoverable view of any kitchen.
+// Public kitchens are visible to any signed-in user; private kitchens return
+// 404 to everyone except current members.
+router.get(
+  "/:id",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const view = await getPublicKitchen(currentUser._id.toString(), id);
+    res.status(200).json(view);
+  })
+);
+
+// GET /api/kitchens/:id/schedule — recent + upcoming schedule entries for a
+// public kitchen. Same privacy gate as `/:id`.
+router.get(
+  "/:id/schedule",
+  requireAuth,
+  validate({ params: objectIdParam }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const entries = await getPublicKitchenSchedule(
+      currentUser._id.toString(),
+      id
+    );
+    res.status(200).json({ entries });
+  })
+);
+
+// GET /api/kitchens/:id/recipes — discoverable recipes from this kitchen's
+// members. Same privacy gate as `/:id`.
+router.get(
+  "/:id/recipes",
+  requireAuth,
+  validate({ params: objectIdParam, query: paginationSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const { page, limit } = req.query as unknown as z.infer<
+      typeof paginationSchema
+    >;
+    const result = await getPublicKitchenRecipes(
+      currentUser._id.toString(),
+      id,
+      page,
+      limit
+    );
+
+    res.status(200).json({
+      recipes: result.data,
+      page: result.page,
+      limit: result.limit,
+      total: result.total,
+      totalPages: result.totalPages,
     });
   })
 );
