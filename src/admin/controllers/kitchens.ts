@@ -5,6 +5,8 @@ import ScheduleEntry from "../../models/ScheduleEntry";
 import ShoppingList from "../../models/ShoppingList";
 import AuditLog from "../../models/AuditLog";
 import { logger } from "../../lib/logger";
+import { adminDeleteKitchenPhoto } from "../../services/kitchen-service";
+import { publicIdFromUrl, deleteImage } from "../../lib/cloudinary";
 
 /** Escape user input for use inside a MongoDB `$regex` expression. */
 function escapeRegex(value: string): string {
@@ -268,6 +270,16 @@ export async function deleteKitchen(
     await User.updateMany({ kitchenId: id }, { $unset: { kitchenId: 1 } });
     await ScheduleEntry.deleteMany({ kitchenId: id });
     await ShoppingList.deleteMany({ kitchenId: id });
+
+    // Destroy the Cloudinary photo before dropping the kitchen doc so we
+    // don't leak assets when an admin deletes a kitchen for moderation.
+    if (kitchen.photo) {
+      const publicId = publicIdFromUrl(kitchen.photo);
+      if (publicId) {
+        void deleteImage(publicId);
+      }
+    }
+
     await Kitchen.findByIdAndDelete(id);
 
     await audit(req, "delete_kitchen", "kitchen", id as string, { name: kitchen.name });
@@ -275,5 +287,29 @@ export async function deleteKitchen(
   } catch (error) {
     logger.error({ err: error }, "Failed to delete kitchen");
     res.status(500).json({ error: "Failed to delete kitchen" });
+  }
+}
+
+/**
+ * Moderation action: strip the photo from any kitchen. Bypasses the lead-
+ * ownership check in the service layer and destroys the Cloudinary asset.
+ */
+export async function removeKitchenPhoto(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const kitchen = await adminDeleteKitchenPhoto(id as string);
+    if (!kitchen) {
+      res.status(404).json({ error: "Kitchen not found" });
+      return;
+    }
+
+    await audit(req, "remove_kitchen_photo", "kitchen", id as string);
+    res.json({ success: true, kitchen });
+  } catch (error) {
+    logger.error({ err: error }, "Failed to remove kitchen photo");
+    res.status(500).json({ error: "Failed to remove photo" });
   }
 }

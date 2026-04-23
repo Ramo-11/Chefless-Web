@@ -255,6 +255,18 @@
           suggestionsHtml = '<div class="detail-section"><h4>Pending Suggestions</h4><p class="text-muted">No pending suggestions</p></div>';
         }
 
+        const photoHtml = k.photo
+          ? `<div class="detail-section">
+              <h4>Photo</h4>
+              <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <img src="${esc(k.photo)}" alt="Kitchen photo" style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color, #e5e7eb);">
+                <button class="btn btn-sm btn-danger-outline" onclick="removeKitchenPhoto('${esc(k._id)}')" aria-label="Remove kitchen photo">
+                  <i class="fas fa-trash"></i> Remove photo
+                </button>
+              </div>
+             </div>`
+          : '';
+
         document.getElementById('kitchen-detail-body').innerHTML = `
           <div class="detail-grid">
             <div class="detail-section">
@@ -266,6 +278,7 @@
               <div class="detail-row"><span>Schedule Policy:</span> <span>${esc(policyLabel)}</span></div>
               <div class="detail-row"><span>Created:</span> <span>${new Date(k.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
             </div>
+            ${photoHtml}
             ${membersHtml}
             ${suggestionsHtml}
           </div>
@@ -324,6 +337,18 @@
       toastAndReload('Member removed successfully');
     })
     .catch(() => showToast('Failed to remove member', 'error'));
+  }
+
+  function removeKitchenPhoto(kitchenId) {
+    if (!confirm('Remove this kitchen photo? The Cloudinary asset will be permanently deleted.')) return;
+    adminFetch('/admin/api/kitchens/' + kitchenId + '/photo', {
+      method: 'DELETE'
+    })
+    .then(() => {
+      closeModal('kitchen-detail-modal');
+      toastAndReload('Kitchen photo removed');
+    })
+    .catch(() => showToast('Failed to remove photo', 'error'));
   }
 
   function transferLead(kitchenId, memberId, memberName) {

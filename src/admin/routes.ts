@@ -44,6 +44,7 @@ import {
   removeKitchenMember,
   transferKitchenLead,
   deleteKitchen,
+  removeKitchenPhoto,
 } from "./controllers/kitchens";
 import {
   adminsPage,
@@ -102,6 +103,7 @@ router.get("/api/kitchens/:id/suggestions", kitchenSuggestions);
 router.put("/api/kitchens/:id", csrfProtection, updateKitchen);
 router.post("/api/kitchens/:id/remove-member", csrfProtection, removeKitchenMember);
 router.post("/api/kitchens/:id/transfer-lead", csrfProtection, transferKitchenLead);
+router.delete("/api/kitchens/:id/photo", csrfProtection, removeKitchenPhoto);
 router.delete("/api/kitchens/:id", csrfProtection, deleteKitchen);
 
 // ── Feedback mutation routes (form POSTs, redirect responses) ──────

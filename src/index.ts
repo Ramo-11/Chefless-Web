@@ -145,7 +145,10 @@ app.use("/api/auth", jsonDefault, authLimiter, authRouter);
 app.use("/api/users", jsonUpload, ...apiLimiters, usersRouter);
 app.use("/api/recipes", jsonUpload, ...apiLimiters, recipesRouter);
 app.use("/api/cookbooks", jsonUpload, ...apiLimiters, cookbooksRouter);
-app.use("/api/kitchens", jsonDefault, ...apiLimiters, kitchensRouter);
+// Kitchens routes accept base64 photo uploads on /me/photo — needs larger
+// JSON limit than the default 1MB to handle the base64 overhead on a 1600px
+// JPEG at ~88% quality.
+app.use("/api/kitchens", jsonUpload, ...apiLimiters, kitchensRouter);
 app.use("/api/schedule", jsonDefault, ...apiLimiters, scheduleRouter);
 app.use("/api/shopping-lists", jsonDefault, ...apiLimiters, shoppingListsRouter);
 app.use("/api/search", jsonDefault, ...apiLimiters, searchRouter);

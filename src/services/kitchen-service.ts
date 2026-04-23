@@ -8,6 +8,11 @@ import ShoppingList from "../models/ShoppingList";
 import KitchenInvite, { IKitchenInvite } from "../models/KitchenInvite";
 import RecipeRating from "../models/RecipeRating";
 import {
+  uploadImage,
+  deleteImage,
+  publicIdFromUrl,
+} from "../lib/cloudinary";
+import {
   notifyKitchenInviteWelcome,
   notifyKitchenJoined,
   notifyKitchenRemoved,
@@ -232,6 +237,16 @@ export async function deleteKitchen(userId: string): Promise<void> {
     { kitchenId: kitchen._id },
     { $unset: { kitchenId: 1 } }
   );
+
+  // Destroy the Cloudinary asset (if any) before dropping the kitchen doc.
+  // Fire-and-forget — `deleteImage` already swallows errors so an upstream
+  // Cloudinary hiccup can't block the delete.
+  if (kitchen.photo) {
+    const publicId = publicIdFromUrl(kitchen.photo);
+    if (publicId) {
+      void deleteImage(publicId);
+    }
+  }
 
   await Kitchen.findByIdAndDelete(kitchen._id);
 }
@@ -1165,6 +1180,8 @@ export interface KitchenRatingHistoryPage {
   limit: number;
   total: number;
   totalPages: number;
+  /** Average stars across every rating in the kitchen — not just this page. */
+  avg: number;
 }
 
 /**
@@ -1185,7 +1202,7 @@ export async function getKitchenRatingsHistory(
   const kitchenId = viewer.kitchenId;
   const skip = (page - 1) * limit;
 
-  const [raw, total] = await Promise.all([
+  const [raw, total, avgRow] = await Promise.all([
     RecipeRating.aggregate([
       { $match: { kitchenId } },
       { $sort: { ratedAt: -1 as const } },
@@ -1227,7 +1244,16 @@ export async function getKitchenRatingsHistory(
       },
     ]),
     RecipeRating.countDocuments({ kitchenId }),
+    // Whole-kitchen average so the hub shows a stable figure even when the
+    // user has thousands of ratings and we're only paginating the first
+    // chunk. Runs in parallel with the list + count queries.
+    RecipeRating.aggregate([
+      { $match: { kitchenId } },
+      { $group: { _id: null, avg: { $avg: "$stars" } } },
+    ]),
   ]);
+  const avgRaw = (avgRow[0] as { avg?: number } | undefined)?.avg;
+  const avg = avgRaw ? Number(avgRaw.toFixed(2)) : 0;
 
   interface RawRow {
     _id: Types.ObjectId;
@@ -1266,5 +1292,142 @@ export async function getKitchenRatingsHistory(
     limit,
     total,
     totalPages: Math.max(1, Math.ceil(total / limit)),
+    avg,
   };
+}
+
+// ── Kitchen photo lifecycle ─────────────────────────────────────────────────
+
+/**
+ * Uploads a base64 data URI to Cloudinary under a kitchen-scoped folder and
+ * updates `Kitchen.photo`. If the kitchen already has a photo, the previous
+ * Cloudinary asset is destroyed first so the account doesn't accrete orphans
+ * across every re-upload.
+ *
+ * Lead-only. A non-lead member calling this throws 403.
+ */
+export async function uploadKitchenPhoto(
+  userId: string,
+  dataUri: string
+): Promise<IKitchen> {
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user?.kitchenId) {
+    throw createError("You are not in a kitchen", 400);
+  }
+
+  const kitchen = await Kitchen.findById(user.kitchenId);
+  if (!kitchen) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  if (!kitchen.leadId.equals(userId)) {
+    throw createError(
+      "Only the kitchen lead can update the kitchen photo",
+      403
+    );
+  }
+
+  // Upload first; only mutate the kitchen doc once Cloudinary confirms the
+  // new asset exists. If the upload throws we never end up in a "photo field
+  // points to nothing" state.
+  const result = await uploadImage(
+    dataUri,
+    `kitchens/${kitchen._id.toString()}/photos`
+  );
+
+  const previousPhoto = kitchen.photo;
+
+  const updated = await Kitchen.findByIdAndUpdate(
+    kitchen._id,
+    { $set: { photo: result.secureUrl } },
+    { new: true }
+  );
+
+  if (!updated) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  // Best-effort cleanup of the superseded asset. `deleteImage` already
+  // swallows Cloudinary errors so a failed delete doesn't break the user
+  // flow — we just log and move on.
+  if (previousPhoto) {
+    const prevPublicId = publicIdFromUrl(previousPhoto);
+    if (prevPublicId) {
+      void deleteImage(prevPublicId);
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Removes the kitchen photo and destroys the Cloudinary asset. Idempotent —
+ * returns the current kitchen even when there's no photo to remove. Lead-only.
+ */
+export async function deleteKitchenPhoto(userId: string): Promise<IKitchen> {
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user?.kitchenId) {
+    throw createError("You are not in a kitchen", 400);
+  }
+
+  const kitchen = await Kitchen.findById(user.kitchenId);
+  if (!kitchen) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  if (!kitchen.leadId.equals(userId)) {
+    throw createError(
+      "Only the kitchen lead can remove the kitchen photo",
+      403
+    );
+  }
+
+  const previousPhoto = kitchen.photo;
+
+  const updated = await Kitchen.findByIdAndUpdate(
+    kitchen._id,
+    { $unset: { photo: 1 } },
+    { new: true }
+  );
+
+  if (!updated) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  if (previousPhoto) {
+    const prevPublicId = publicIdFromUrl(previousPhoto);
+    if (prevPublicId) {
+      void deleteImage(prevPublicId);
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Admin helper: remove the photo on any kitchen by id, bypassing lead
+ * ownership. Used by moderation when a photo violates policy. Idempotent.
+ */
+export async function adminDeleteKitchenPhoto(
+  kitchenId: string
+): Promise<IKitchen | null> {
+  if (!Types.ObjectId.isValid(kitchenId)) return null;
+  const kitchen = await Kitchen.findById(kitchenId);
+  if (!kitchen) return null;
+
+  const previousPhoto = kitchen.photo;
+  const updated = await Kitchen.findByIdAndUpdate(
+    kitchen._id,
+    { $unset: { photo: 1 } },
+    { new: true }
+  );
+
+  if (previousPhoto) {
+    const prevPublicId = publicIdFromUrl(previousPhoto);
+    if (prevPublicId) {
+      void deleteImage(prevPublicId);
+    }
+  }
+
+  return updated;
 }

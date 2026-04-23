@@ -28,6 +28,8 @@ import {
   getPublicKitchenSchedule,
   getPublicKitchenRecipes,
   getKitchenRatingsHistory,
+  uploadKitchenPhoto,
+  deleteKitchenPhoto,
   INVITE_CODE_REGEX,
 } from "../services/kitchen-service";
 
@@ -55,19 +57,45 @@ const objectIdParam = z.object({
 
 const createKitchenSchema = z.object({
   name: z.string().min(1).max(100).trim(),
+  // Photo is set via `POST /me/photo` after the kitchen exists (so the
+  // Cloudinary folder can be keyed by kitchenId). Accepted on create only
+  // as a pass-through URL for legacy clients — new Flutter clients upload
+  // separately.
   photo: z.string().url().optional(),
   isPublic: z.boolean().optional(),
 });
 
 const updateKitchenSchema = z.object({
   name: z.string().min(1).max(100).trim().optional(),
-  photo: z.string().url().optional(),
+  // Intentionally omitted: `photo` is now set only through the dedicated
+  // upload endpoint so the Cloudinary lifecycle (folder, replace, delete)
+  // is owned by the server rather than by arbitrary client-supplied URLs.
   isPublic: z.boolean().optional(),
   scheduleAddPolicy: z.enum(["lead_only", "all"]).optional(),
   ratingsVisibility: z.enum(["public", "kitchen_only", "off"]).optional(),
   showMembersPublicly: z.boolean().optional(),
   allowMemberSuggestions: z.boolean().optional(),
   allowAutoScheduleSuggestions: z.boolean().optional(),
+});
+
+// Cap: 14MB base64 = ~10MB raw image. Keeps us comfortably under the
+// `jsonUpload` 15MB body limit and under Cloudinary's free-tier asset ceiling
+// so a pathologically large crop (or a clock-skewed client) can't wedge the
+// upload path.
+const MAX_KITCHEN_PHOTO_BASE64_BYTES = 14 * 1024 * 1024;
+
+const kitchenPhotoBodySchema = z.object({
+  image: z
+    .string()
+    .min(1, "Image data is required")
+    .refine(
+      (val) => val.startsWith("data:image/"),
+      { message: "Must be a valid base64 data URI (data:image/...)" }
+    )
+    .refine(
+      (val) => val.length <= MAX_KITCHEN_PHOTO_BASE64_BYTES,
+      { message: "Photo is too large. Please pick a smaller image." }
+    ),
 });
 
 const joinKitchenSchema = z.object({
@@ -185,6 +213,53 @@ router.delete(
     await deleteKitchen(currentUser._id.toString());
 
     res.status(200).json({ success: true });
+  })
+);
+
+// POST /api/kitchens/me/photo — Upload (or replace) the kitchen photo.
+// Lead-only. Replaces any prior photo in Cloudinary so we don't leak assets.
+router.post(
+  "/me/photo",
+  requireAuth,
+  strictLimiter,
+  validate({ body: kitchenPhotoBodySchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id")
+      .lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { image } = req.body as z.infer<typeof kitchenPhotoBodySchema>;
+    const kitchen = await uploadKitchenPhoto(
+      currentUser._id.toString(),
+      image
+    );
+
+    res.status(200).json({ kitchen });
+  })
+);
+
+// DELETE /api/kitchens/me/photo — Remove the kitchen photo and destroy the
+// Cloudinary asset. Lead-only. Idempotent — returns 200 even if no photo.
+router.delete(
+  "/me/photo",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id")
+      .lean();
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const kitchen = await deleteKitchenPhoto(currentUser._id.toString());
+    res.status(200).json({ kitchen });
   })
 );
 
