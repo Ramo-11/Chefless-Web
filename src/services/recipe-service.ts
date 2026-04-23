@@ -575,7 +575,7 @@ export async function forkRecipe(
   // Visibility check + duplicate-fork check in parallel.
   const [author, existingFork] = await Promise.all([
     User.findById(originalRecipe.authorId)
-      .select("fullName isPublic kitchenId isBanned")
+      .select("fullName signature isPublic kitchenId isBanned")
       .lean(),
     Recipe.findOne({
       authorId: new Types.ObjectId(userId),
@@ -640,6 +640,11 @@ export async function forkRecipe(
         authorId: originalRecipe.authorId,
         authorName: author.fullName,
       },
+      // Snapshot the origin chef's signature at fork time so it survives the
+      // origin author later removing/changing it or the source recipe being
+      // deleted. Always preserved on remixes for attribution — independent of
+      // the origin recipe's `showSignature` toggle.
+      originalSignatureUrl: author.signature ?? undefined,
       isModifiedFork: false,
       isPrivate: false,
     });

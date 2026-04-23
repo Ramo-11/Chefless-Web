@@ -43,6 +43,14 @@ export interface IRecipe extends Document {
   costEstimate?: "budget" | "moderate" | "expensive";
   baseServings: number;
   forkedFrom?: IForkedFrom;
+  /**
+   * Snapshot of the origin author's signature image at the moment this remix
+   * was created. Preserved on the remix document itself so the original chef's
+   * mark stays visible even if they later remove their signature, change it,
+   * or delete the source recipe. Only populated for remixes whose origin
+   * author had a signature on file at fork time.
+   */
+  originalSignatureUrl?: string;
   isModifiedFork: boolean;
   isPrivate: boolean;
   isHidden: boolean;
@@ -182,6 +190,9 @@ const recipeSchema = new Schema<IRecipe>(
     },
     forkedFrom: {
       type: forkedFromSchema,
+    },
+    originalSignatureUrl: {
+      type: String,
     },
     isModifiedFork: {
       type: Boolean,
