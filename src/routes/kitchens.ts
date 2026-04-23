@@ -30,6 +30,8 @@ import {
   getKitchenRatingsHistory,
   uploadKitchenPhoto,
   deleteKitchenPhoto,
+  updateMealSlotOrder,
+  syncMealSlotOrderWithCustomSlots,
   INVITE_CODE_REGEX,
 } from "../services/kitchen-service";
 
@@ -72,10 +74,20 @@ const updateKitchenSchema = z.object({
   // is owned by the server rather than by arbitrary client-supplied URLs.
   isPublic: z.boolean().optional(),
   scheduleAddPolicy: z.enum(["lead_only", "all"]).optional(),
+  slotOrderEditPolicy: z.enum(["lead_only", "editors", "all"]).optional(),
   ratingsVisibility: z.enum(["public", "kitchen_only", "off"]).optional(),
   showMembersPublicly: z.boolean().optional(),
   allowMemberSuggestions: z.boolean().optional(),
   allowAutoScheduleSuggestions: z.boolean().optional(),
+});
+
+const mealSlotOrderSchema = z.object({
+  // 4 defaults + 20 max customs = 24; allow a small cushion for legacy
+  // kitchens with orphan slots the client surfaces alongside known ones.
+  mealSlotOrder: z
+    .array(z.string().min(1).max(40).trim())
+    .min(1)
+    .max(30),
 });
 
 // Cap: 14MB base64 = ~10MB raw image. Keeps us comfortably under the
@@ -192,6 +204,30 @@ router.patch(
 
     const updates = req.body as z.infer<typeof updateKitchenSchema>;
     const kitchen = await updateKitchen(currentUser._id.toString(), updates);
+
+    res.status(200).json({ kitchen });
+  })
+);
+
+// PATCH /api/kitchens/me/slot-order — Reorder meal slots (policy-gated)
+router.patch(
+  "/me/slot-order",
+  requireAuth,
+  validate({ body: mealSlotOrderSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { mealSlotOrder } = req.body as z.infer<typeof mealSlotOrderSchema>;
+    const kitchen = await updateMealSlotOrder(
+      currentUser._id.toString(),
+      mealSlotOrder
+    );
 
     res.status(200).json({ kitchen });
   })
@@ -695,6 +731,10 @@ router.put(
       { customMealSlots: normalised },
       { new: true, select: "customMealSlots" }
     ).lean();
+
+    // Keep the ordered view (`mealSlotOrder`) in lockstep with the set of
+    // actual slots. No-op for grandfathered kitchens that never reordered.
+    await syncMealSlotOrderWithCustomSlots(currentUser.kitchenId, normalised);
 
     let deletedEntries = 0;
     if (removedSlots.length > 0 && affectedCount > 0) {

@@ -153,6 +153,7 @@ export async function updateKitchen(
     photo?: string;
     isPublic?: boolean;
     scheduleAddPolicy?: "lead_only" | "all";
+    slotOrderEditPolicy?: "lead_only" | "editors" | "all";
     ratingsVisibility?: "public" | "kitchen_only" | "off";
     showMembersPublicly?: boolean;
     allowMemberSuggestions?: boolean;
@@ -180,6 +181,9 @@ export async function updateKitchen(
   if (updates.scheduleAddPolicy !== undefined) {
     updateFields.scheduleAddPolicy = updates.scheduleAddPolicy;
   }
+  if (updates.slotOrderEditPolicy !== undefined) {
+    updateFields.slotOrderEditPolicy = updates.slotOrderEditPolicy;
+  }
   if (updates.ratingsVisibility !== undefined) {
     updateFields.ratingsVisibility = updates.ratingsVisibility;
   }
@@ -205,6 +209,117 @@ export async function updateKitchen(
   }
 
   return updated;
+}
+
+/** Default meal slots present in every kitchen — mirrors the Flutter client. */
+export const DEFAULT_MEAL_SLOTS: readonly string[] = [
+  "breakfast",
+  "lunch",
+  "dinner",
+  "snack",
+];
+
+function hasSlotOrderEditPermission(
+  userId: string,
+  kitchen: Pick<
+    IKitchen,
+    "leadId" | "membersWithScheduleEdit" | "slotOrderEditPolicy"
+  >
+): boolean {
+  if (kitchen.leadId.equals(userId)) return true;
+  switch (kitchen.slotOrderEditPolicy) {
+    case "all":
+      // Any kitchen member — membership is enforced separately via kitchenId.
+      return true;
+    case "editors":
+      return kitchen.membersWithScheduleEdit.some((id) => id.equals(userId));
+    case "lead_only":
+    default:
+      return false;
+  }
+}
+
+/**
+ * Reorders the kitchen's meal slots. The submitted list must contain exactly
+ * the same slots currently in use (defaults + customs) — same multiset,
+ * possibly in a new order. Any addition/removal must go through the
+ * custom-slots endpoint first so schedule entries can be cascade-handled.
+ */
+export async function updateMealSlotOrder(
+  userId: string,
+  submittedOrder: string[]
+): Promise<IKitchen> {
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user || !user.kitchenId) {
+    throw createError("You are not in a kitchen", 400);
+  }
+
+  const kitchen = await Kitchen.findById(user.kitchenId);
+  if (!kitchen) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  if (!hasSlotOrderEditPermission(userId, kitchen)) {
+    throw createError(
+      "You don't have permission to reorder this kitchen's meal slots",
+      403
+    );
+  }
+
+  const expected = [...DEFAULT_MEAL_SLOTS, ...kitchen.customMealSlots];
+  const normaliseKey = (s: string) => s.trim().toLowerCase();
+  const expectedKeys = [...expected].map(normaliseKey).sort();
+  const submittedKeys = [...submittedOrder].map(normaliseKey).sort();
+
+  const sameSet =
+    expectedKeys.length === submittedKeys.length &&
+    expectedKeys.every((k, i) => k === submittedKeys[i]);
+
+  if (!sameSet) {
+    throw createError(
+      "mealSlotOrder must contain exactly the kitchen's current slots",
+      400
+    );
+  }
+
+  // Persist in the exact casing the caller sent, so custom slots like
+  // "Pre-Workout" keep their chosen display form.
+  kitchen.mealSlotOrder = submittedOrder.map((s) => s.trim());
+  await kitchen.save();
+
+  return kitchen;
+}
+
+/**
+ * Keeps `mealSlotOrder` in sync with a freshly-written `customMealSlots` list.
+ * Called by the custom-slots PUT handler after the new list is saved. A no-op
+ * for grandfathered kitchens (`mealSlotOrder == null`), so the fallback path
+ * on the client keeps working.
+ */
+export async function syncMealSlotOrderWithCustomSlots(
+  kitchenId: Types.ObjectId | string,
+  newCustomSlots: string[]
+): Promise<void> {
+  const kitchen = await Kitchen.findById(kitchenId).select(
+    "mealSlotOrder customMealSlots"
+  );
+  if (!kitchen || !kitchen.mealSlotOrder) return;
+
+  const lower = (s: string) => s.trim().toLowerCase();
+  const customLowerToCased = new Map(newCustomSlots.map((s) => [lower(s), s]));
+  const defaultSet = new Set(DEFAULT_MEAL_SLOTS.map(lower));
+
+  const retained = kitchen.mealSlotOrder.filter((slot) => {
+    const key = lower(slot);
+    return defaultSet.has(key) || customLowerToCased.has(key);
+  });
+  const retainedKeys = new Set(retained.map(lower));
+  const appended = [...customLowerToCased.entries()]
+    .filter(([key]) => !retainedKeys.has(key))
+    .map(([, cased]) => cased);
+
+  kitchen.mealSlotOrder = [...retained, ...appended];
+  await kitchen.save();
 }
 
 export async function deleteKitchen(userId: string): Promise<void> {

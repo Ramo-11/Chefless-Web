@@ -20,6 +20,25 @@ export interface IKitchen extends Document {
   /** Custom meal slot names added by the kitchen lead (e.g. "Pre-Workout", "Late Night"). */
   customMealSlots: string[];
   /**
+   * Kitchen-preferred display order for all meal slots (defaults + customs).
+   * When set, this is the single source of truth for sorting on the home
+   * glance strip and the schedule screen. When `undefined` (grandfathered
+   * kitchens that pre-date the reorder feature), clients fall back to
+   * `[...defaults, ...customMealSlots]`.
+   *
+   * Server-side invariant: whenever `customMealSlots` is mutated, if
+   * `mealSlotOrder` is set it is spliced in lockstep — never allowed to
+   * desync from the set of slots actually in use.
+   */
+  mealSlotOrder?: string[];
+  /**
+   * Controls who can reorder `mealSlotOrder`.
+   * - `"lead_only"` (default): only the kitchen lead.
+   * - `"editors"`: lead + members in `membersWithScheduleEdit`.
+   * - `"all"`: any kitchen member.
+   */
+  slotOrderEditPolicy: "lead_only" | "editors" | "all";
+  /**
    * Controls who can add schedule entries directly.
    * - `"lead_only"`: only the lead and members in `membersWithScheduleEdit` add directly;
    *   everyone else's additions become suggestions awaiting approval.
@@ -110,6 +129,20 @@ const kitchenSchema = new Schema<IKitchen>(
         validator: (v: string[]) => v.length <= 20,
         message: "Maximum 20 custom meal slots allowed",
       },
+    },
+    mealSlotOrder: {
+      type: [String],
+      validate: {
+        // 4 defaults + 20 max customs = 24; small cushion so the validator
+        // doesn't trip when the API pre-validates the set-equality check.
+        validator: (v: string[]) => !v || v.length <= 30,
+        message: "mealSlotOrder may contain at most 30 entries",
+      },
+    },
+    slotOrderEditPolicy: {
+      type: String,
+      enum: ["lead_only", "editors", "all"],
+      default: "lead_only",
     },
     scheduleAddPolicy: {
       type: String,
