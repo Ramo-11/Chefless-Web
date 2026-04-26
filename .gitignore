@@ -9,6 +9,10 @@ dist/
 .env.*
 !.env.example
 
+# Test/reviewer account scripts — never check in (creds live in env)
+src/scripts/create-apple-review-user.ts
+src/scripts/delete-apple-review-user.ts
+
 # Logs
 *.log
 npm-debug.log*
