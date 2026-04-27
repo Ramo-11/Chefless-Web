@@ -61,6 +61,12 @@ import {
   deleteFeedback,
 } from "./controllers/feedback";
 import { moderatedPostsPage } from "./controllers/moderated-posts";
+import {
+  appConfigPage,
+  updateAppConfig,
+  addWrappedTestUser,
+  removeWrappedTestUser,
+} from "./controllers/app-config";
 
 const router = Router();
 
@@ -117,6 +123,19 @@ router.put("/api/admins/:id", requireSuperAdmin, csrfProtection, updateAdmin);
 router.post("/api/admins/:id/toggle-active", requireSuperAdmin, csrfProtection, toggleAdminActive);
 router.post("/api/admins/:id/reset-password", requireSuperAdmin, csrfProtection, resetAdminPassword);
 
+// ── App config (runtime feature flags) ─────────────────────────────
+router.post("/api/app-config", csrfProtection, updateAppConfig);
+router.post(
+  "/api/app-config/wrapped-test-users",
+  csrfProtection,
+  addWrappedTestUser
+);
+router.delete(
+  "/api/app-config/wrapped-test-users/:id",
+  csrfProtection,
+  removeWrappedTestUser
+);
+
 // ── Page routes (with layout) ──────────────────────────────────────
 router.use(expressLayouts);
 router.get("/", dashboardPage);
@@ -132,5 +151,6 @@ router.get("/kitchens", kitchensPage);
 router.get("/feedback", feedbackPage);
 router.get("/feedback/:id", feedbackDetail);
 router.get("/admins", requireSuperAdmin, adminsPage);
+router.get("/app-config", appConfigPage);
 
 export default router;

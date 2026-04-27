@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import User from "../models/User";
 import { getWrappedSummary } from "../services/wrapped-service";
+import { getAppConfig, isWrappedAvailableFor } from "../lib/app-config";
 
 const router = Router();
 
@@ -36,6 +37,11 @@ router.get(
     const user = await User.findOne({ firebaseUid }).select("_id").lean();
     if (!user) {
       res.status(404).json({ error: "User not found" });
+      return;
+    }
+    const config = await getAppConfig();
+    if (!isWrappedAvailableFor(config, user._id)) {
+      res.status(403).json({ error: "Wrapped is not available right now." });
       return;
     }
     const { year } = req.query as unknown as z.infer<typeof yearSchema>;

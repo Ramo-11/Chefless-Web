@@ -1,0 +1,182 @@
+<% var pageTitle = 'App Settings'; %>
+<% var page = 'app-config'; %>
+
+<div class="page-header">
+  <h1>App Settings</h1>
+  <p class="page-subtitle">Runtime feature flags the mobile app reads on launch.</p>
+</div>
+
+<div class="card card-form" style="max-width: 720px;">
+  <div class="card-header">
+    <h2>Chefless Wrapped</h2>
+  </div>
+  <div class="card-body">
+    <p class="text-muted" style="margin-bottom: 1.5rem; line-height: 1.5;">
+      Wrapped is the end-of-year recap users see in their profile. Flip "available to users" on
+      when you're ready to drop it for everyone — or add specific accounts to the test list below
+      to verify the experience first.
+    </p>
+
+    <div class="form-group">
+      <label class="switch-label" style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+        <input
+          type="checkbox"
+          id="wrapped-enabled"
+          <%= wrappedEnabled ? 'checked' : '' %>
+        >
+        <span><strong>Wrapped is available to all users</strong></span>
+      </label>
+      <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">
+        Currently:
+        <% if (wrappedEnabled) { %>
+          <span class="badge badge-success">Visible to everyone</span>
+        <% } else { %>
+          <span class="badge badge-default">Hidden — only test users below see it</span>
+        <% } %>
+      </p>
+    </div>
+
+    <div class="form-group" style="margin-top: 1.5rem;">
+      <label for="wrapped-year">Wrapped year</label>
+      <input
+        type="number"
+        id="wrapped-year"
+        min="2025"
+        max="<%= currentYear %>"
+        placeholder="<%= currentYear %> (current year)"
+        value="<%= wrappedYear !== null ? wrappedYear : '' %>"
+      >
+      <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.875rem;">
+        Leave blank to default to the current calendar year (<%= currentYear %>). Set explicitly when
+        you want to keep showing last year's recap into the new year.
+      </p>
+    </div>
+
+    <div class="form-group" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-subtle, #f8f8f6); border-radius: 8px;">
+      <label class="switch-label" style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer;">
+        <input type="checkbox" id="bump-wrapped-revision" style="margin-top: 0.2rem;">
+        <span>
+          <strong>Re-trigger drop for everyone who's already seen it</strong>
+          <p class="text-muted" style="margin-top: 0.4rem; font-size: 0.8rem; line-height: 1.4;">
+            Check this when broadcasting so test users (and anyone else who already saw their
+            recap) get the auto-launch again. Only applies on save — leaves the box unchecked
+            after a refresh.
+          </p>
+        </span>
+      </label>
+    </div>
+
+    <button class="btn btn-primary" onclick="saveAppConfig()" style="margin-top: 1rem;">
+      <i class="fas fa-save"></i> Save settings
+    </button>
+
+    <p class="text-muted" style="margin-top: 1.5rem; font-size: 0.75rem;">
+      Last updated: <%= updatedAt ? new Date(updatedAt).toLocaleString() : 'never' %>
+      &nbsp;·&nbsp; Drop revision: <%= wrappedRevision %>
+    </p>
+  </div>
+</div>
+
+<div class="card card-form" style="max-width: 720px; margin-top: 1.5rem;">
+  <div class="card-header">
+    <h2>Wrapped — test users</h2>
+  </div>
+  <div class="card-body">
+    <p class="text-muted" style="margin-bottom: 1.25rem; line-height: 1.5;">
+      Users on this list see Wrapped (auto-launch + profile tile) regardless of the global toggle.
+      Use it to test the full drop on real accounts before going public. Add yourself, the partner,
+      or any other beta tester by their account email.
+    </p>
+
+    <div class="form-row" style="align-items: end; gap: 0.75rem;">
+      <div class="form-group" style="flex: 1; margin-bottom: 0;">
+        <label for="test-user-email">Account email</label>
+        <input type="email" id="test-user-email" placeholder="someone@example.com">
+      </div>
+      <button class="btn btn-primary" onclick="addTestUser()" style="white-space: nowrap;">
+        <i class="fas fa-plus"></i> Add tester
+      </button>
+    </div>
+
+    <div style="margin-top: 1.5rem;">
+      <% if (wrappedTestUsers && wrappedTestUsers.length > 0) { %>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th style="width: 80px;">Remove</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% wrappedTestUsers.forEach(function(u) { %>
+                <tr id="test-user-<%= u.id %>">
+                  <td><%= u.fullName %></td>
+                  <td class="text-muted"><%= u.email %></td>
+                  <td>
+                    <button
+                      class="btn btn-sm btn-danger-outline"
+                      onclick="removeTestUser('<%= u.id %>', '<%= u.fullName.replace(/'/g, "\\'") %>')"
+                      aria-label="Remove from test list"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+              <% }); %>
+            </tbody>
+          </table>
+        </div>
+      <% } else { %>
+        <div class="empty-state-inline">No test users yet. Add an email above to start testing.</div>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<script>
+  function saveAppConfig() {
+    var enabled = document.getElementById('wrapped-enabled').checked;
+    var yearRaw = document.getElementById('wrapped-year').value.trim();
+    var bump = document.getElementById('bump-wrapped-revision').checked;
+    var body = {
+      wrappedEnabled: enabled,
+      wrappedYear: yearRaw === '' ? null : Number(yearRaw),
+      bumpWrappedRevision: bump
+    };
+
+    adminFetch('/admin/api/app-config', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    })
+      .then(function () { toastAndReload('Settings saved'); })
+      .catch(function (e) { showToast(e.message || 'Failed to save settings', 'error'); });
+  }
+
+  function addTestUser() {
+    var input = document.getElementById('test-user-email');
+    var email = (input.value || '').trim();
+    if (!email) {
+      showToast('Email is required', 'error');
+      return;
+    }
+    adminFetch('/admin/api/app-config/wrapped-test-users', {
+      method: 'POST',
+      body: JSON.stringify({ email: email })
+    })
+      .then(function () { toastAndReload('Test user added'); })
+      .catch(function (e) { showToast(e.message || 'Failed to add tester', 'error'); });
+  }
+
+  function removeTestUser(id, name) {
+    if (!confirm('Remove "' + name + '" from the Wrapped test list?')) return;
+    adminFetch('/admin/api/app-config/wrapped-test-users/' + id, { method: 'DELETE' })
+      .then(function () {
+        showToast('Removed', 'success');
+        var row = document.getElementById('test-user-' + id);
+        if (row) row.remove();
+      })
+      .catch(function (e) { showToast(e.message || 'Failed to remove tester', 'error'); });
+  }
+</script>

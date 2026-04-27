@@ -41,6 +41,7 @@ import cookedPostsRouter from "./routes/cooked-posts";
 import passportRouter from "./routes/passport";
 import remixTreeRouter from "./routes/remix-tree";
 import wrappedRouter from "./routes/wrapped";
+import appConfigRouter from "./routes/app-config";
 
 const app = express();
 
@@ -166,6 +167,7 @@ app.use("/api/cooked-posts", jsonUpload, ...apiLimiters, cookedPostsRouter);
 app.use("/api/passport", jsonDefault, ...apiLimiters, passportRouter);
 app.use("/api/remix-tree", jsonDefault, ...apiLimiters, remixTreeRouter);
 app.use("/api/wrapped", jsonDefault, ...apiLimiters, wrappedRouter);
+app.use("/api/app-config", jsonDefault, ...apiLimiters, appConfigRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);
