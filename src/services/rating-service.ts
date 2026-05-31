@@ -3,7 +3,8 @@ import RecipeRating, { IRecipeRating } from "../models/RecipeRating";
 import Recipe from "../models/Recipe";
 import Kitchen from "../models/Kitchen";
 import ScheduleEntry from "../models/ScheduleEntry";
-import User from "../models/User";
+import User, { IUser } from "../models/User";
+import { canViewRecipe } from "./visibility-service";
 
 interface AppError extends Error {
   statusCode: number;
@@ -93,8 +94,26 @@ export async function upsertRating(
   const recipeOid = new Types.ObjectId(input.recipeId);
   const userOid = new Types.ObjectId(input.userId);
 
-  const recipe = await Recipe.findById(recipeOid).select("_id").lean();
+  const recipe = await Recipe.findById(recipeOid)
+    .select("authorId isPrivate")
+    .lean();
   if (!recipe) throw createError("Recipe not found", 404);
+
+  // Only viewers who can actually open the recipe may rate it — mirror the
+  // visibility gate used by likeRecipe / saveRecipe.
+  const author = await User.findById(recipe.authorId)
+    .select("isPublic kitchenId")
+    .lean();
+  if (!author) throw createError("Recipe author not found", 404);
+
+  const canView = await canViewRecipe(
+    userOid,
+    recipe,
+    author as unknown as IUser
+  );
+  if (!canView) {
+    throw createError("You do not have permission to rate this recipe", 403);
+  }
 
   const user = await User.findById(userOid).select("kitchenId").lean();
   if (!user) throw createError("User not found", 404);

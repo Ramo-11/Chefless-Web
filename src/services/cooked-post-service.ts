@@ -16,6 +16,7 @@ import {
   notifyCookedPostRemoved,
 } from "./notification-service";
 import { canViewRecipe } from "./visibility-service";
+import { getBlockedUserIds } from "./block-service";
 
 interface AppError extends Error {
   statusCode: number;
@@ -278,10 +279,16 @@ export async function listCookedPostsForRecipe(
     );
   }
 
+  // Exclude posts authored by users the viewer has blocked (or who blocked them).
+  const blockedIds = await getBlockedUserIds(viewerId);
+
   const query: Record<string, unknown> = {
     recipeId: new Types.ObjectId(recipeId),
     removedAt: null,
   };
+  if (blockedIds.length > 0) {
+    query.userId = { $nin: blockedIds };
+  }
   if (cursor) {
     query._id = { $lt: new Types.ObjectId(cursor) };
   }

@@ -36,6 +36,7 @@ import {
   DEFAULT_MEAL_SLOTS,
   INVITE_CODE_REGEX,
 } from "../services/kitchen-service";
+import { imageDataUri } from "../lib/image-validation";
 
 const router = Router();
 
@@ -92,24 +93,13 @@ const mealSlotOrderSchema = z.object({
     .max(30),
 });
 
-// Cap: 14MB base64 = ~10MB raw image. Keeps us comfortably under the
-// `jsonUpload` 15MB body limit and under Cloudinary's free-tier asset ceiling
-// so a pathologically large crop (or a clock-skewed client) can't wedge the
-// upload path.
-const MAX_KITCHEN_PHOTO_BASE64_BYTES = 14 * 1024 * 1024;
-
+// Validate the kitchen photo as a real base64 image data URI with a decoded
+// size cap (see `imageDataUri`). This keeps us comfortably under the
+// `jsonUpload` body limit and under Cloudinary's free-tier asset ceiling so a
+// pathologically large crop (or a clock-skewed client) can't wedge the upload
+// path, and rejects spoofed MIME types via a magic-byte check.
 const kitchenPhotoBodySchema = z.object({
-  image: z
-    .string()
-    .min(1, "Image data is required")
-    .refine(
-      (val) => val.startsWith("data:image/"),
-      { message: "Must be a valid base64 data URI (data:image/...)" }
-    )
-    .refine(
-      (val) => val.length <= MAX_KITCHEN_PHOTO_BASE64_BYTES,
-      { message: "Photo is too large. Please pick a smaller image." }
-    ),
+  image: imageDataUri(),
 });
 
 const joinKitchenSchema = z.object({

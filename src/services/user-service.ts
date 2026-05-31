@@ -16,6 +16,7 @@ import Block from "../models/Block";
 import CookedPost from "../models/CookedPost";
 import admin from "firebase-admin";
 import { canViewProfile } from "./visibility-service";
+import { isBlocked } from "./block-service";
 import { cascadeRecipeDeletion } from "./recipe-service";
 import {
   notifyNewFollower,
@@ -85,10 +86,19 @@ export async function getUserById(
   const user = await User.findById(userId);
   if (!user) return null;
 
-  const canView = await canViewProfile(
-    requesterId ? new Types.ObjectId(requesterId) : null,
-    user
-  );
+  // A block in either direction severs profile visibility EVEN for public
+  // accounts (which otherwise skip canViewProfile's gating). Without this an
+  // explicitly blocked user could still read the blocker's public profile.
+  const blocked = requesterId
+    ? await isBlocked(requesterId, userId)
+    : false;
+
+  const canView =
+    !blocked &&
+    (await canViewProfile(
+      requesterId ? new Types.ObjectId(requesterId) : null,
+      user
+    ));
 
   const badge = computeSpatulaBadge(spatulaCountForUser(user));
 
@@ -677,6 +687,17 @@ export async function followUser(
       statusCode: number;
     };
     error.statusCode = 404;
+    throw error;
+  }
+
+  // A block in either direction forbids re-attaching a follow. Blocking tears
+  // down existing follows, so without this guard a blocked user could simply
+  // re-follow the blocker.
+  if (await isBlocked(followerId, targetId)) {
+    const error = new Error("You cannot follow this user") as Error & {
+      statusCode: number;
+    };
+    error.statusCode = 403;
     throw error;
   }
 

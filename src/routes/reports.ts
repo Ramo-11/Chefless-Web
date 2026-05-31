@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
+import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import User from "../models/User";
@@ -16,7 +17,9 @@ const router = Router();
 
 const createReportSchema = z.object({
   targetType: z.enum(["recipe", "user"]),
-  targetId: z.string().min(1),
+  targetId: z
+    .string()
+    .refine(mongoose.Types.ObjectId.isValid, { message: "Invalid target ID" }),
   reason: z.enum(["spam", "inappropriate", "copyright", "harassment", "other"]),
   description: z.string().max(500).optional(),
 });
@@ -56,24 +59,31 @@ function requireAdminApi(req: Request, res: Response): boolean {
   return true;
 }
 
+const idParamSchema = z.object({
+  id: z
+    .string()
+    .refine(mongoose.Types.ObjectId.isValid, { message: "Invalid ID" }),
+});
+
+const listReportsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(["pending", "reviewed", "dismissed", "action_taken"]).optional(),
+  targetType: z.enum(["recipe", "user"]).optional(),
+});
+
 router.get(
   "/",
   requireAuth,
+  validate({ query: listReportsQuerySchema }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!requireAdminApi(req, res)) return;
 
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
-      const status = req.query.status as string | undefined;
-      const targetType = req.query.targetType as string | undefined;
+      const { page, limit, status, targetType } =
+        req.query as unknown as z.infer<typeof listReportsQuerySchema>;
 
-      const result = await getReports({
-        page,
-        limit,
-        status: status as "pending" | "reviewed" | "dismissed" | "action_taken" | undefined,
-        targetType: targetType as "recipe" | "user" | undefined,
-      });
+      const result = await getReports({ page, limit, status, targetType });
 
       res.json(result);
     } catch (error) {
@@ -85,11 +95,12 @@ router.get(
 router.get(
   "/:id",
   requireAuth,
+  validate({ params: idParamSchema }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!requireAdminApi(req, res)) return;
 
-      const id = req.params.id as string;
+      const { id } = req.params as z.infer<typeof idParamSchema>;
       const report = await getReportById(id);
       res.json({ report });
     } catch (error) {
@@ -106,12 +117,12 @@ const reviewSchema = z.object({
 router.patch(
   "/:id",
   requireAuth,
-  validate({ body: reviewSchema }),
+  validate({ params: idParamSchema, body: reviewSchema }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!requireAdminApi(req, res)) return;
 
-      const id = req.params.id as string;
+      const { id } = req.params as z.infer<typeof idParamSchema>;
       const adminUserId = req.session?.adminId ?? "system";
       const report = await reviewReport(
         id,

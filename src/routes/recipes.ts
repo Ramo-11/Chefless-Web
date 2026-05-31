@@ -40,6 +40,7 @@ import {
   aiExtractRecipeFromCaption,
   getAiUsage,
 } from "../services/ai-recipe-service";
+import { imageDataUri } from "../lib/image-validation";
 
 const router = Router();
 
@@ -154,14 +155,16 @@ const shareRecipeSchema = z.object({
   message: z.string().max(500).optional(),
 });
 
-const uploadPhotoSchema = z.object({
-  image: z
+const sharedWithMeQuerySchema = z.object({
+  cursor: z
     .string()
-    .min(1, "Image data is required")
-    .refine(
-      (val) => val.startsWith("data:image/"),
-      { message: "Must be a valid base64 data URI (data:image/...)" }
-    ),
+    .refine(isValidObjectId, { message: "Invalid cursor" })
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+const uploadPhotoSchema = z.object({
+  image: imageDataUri(),
   folder: z.string().max(100).optional(),
 });
 
@@ -305,6 +308,7 @@ router.post(
 router.get(
   "/shared-with-me",
   requireAuth,
+  validate({ query: sharedWithMeQuerySchema }),
   asyncHandler(async (req: Request, res: Response) => {
     const firebaseUid = req.user!.uid;
     const user = await User.findOne({ firebaseUid }).select("_id").lean();
@@ -314,11 +318,9 @@ router.get(
       return;
     }
 
-    const cursor = req.query.cursor as string | undefined;
-    const limit = Math.min(
-      Math.max(parseInt(req.query.limit as string, 10) || 20, 1),
-      50
-    );
+    const { cursor, limit } = req.query as unknown as z.infer<
+      typeof sharedWithMeQuerySchema
+    >;
 
     const result = await listSharedWithMe(user._id.toString(), cursor, limit);
     res.status(200).json(result);

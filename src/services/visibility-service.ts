@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import Follow from "../models/Follow";
 import { IUser } from "../models/User";
+import { isBlocked } from "./block-service";
 
 export async function canViewProfile(
   viewerId: Types.ObjectId | string | null,
@@ -9,6 +10,16 @@ export async function canViewProfile(
   // Same user can always view their own profile
   if (viewerId && targetUser._id.equals(viewerId)) {
     return true;
+  }
+
+  // A block in either direction severs all profile visibility, even for
+  // public accounts — a blocked user must not be able to view or re-follow
+  // the blocker's profile.
+  if (
+    viewerId &&
+    (await isBlocked(viewerId.toString(), targetUser._id.toString()))
+  ) {
+    return false;
   }
 
   // Public accounts are always viewable

@@ -4,6 +4,9 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import User from "../models/User";
+import { imageDataUri } from "../lib/image-validation";
+import { isBlocked } from "../services/block-service";
+import { canViewProfile } from "../services/visibility-service";
 import {
   createCookedPost,
   deleteCookedPost,
@@ -44,16 +47,14 @@ const createCookedPostSchema = z.object({
 });
 
 const uploadPhotoSchema = z.object({
-  image: z
-    .string()
-    .min(1, "Image data is required")
-    .refine((val) => val.startsWith("data:image/"), {
-      message: "Must be a valid base64 data URI (data:image/...)",
-    }),
+  image: imageDataUri(),
 });
 
 const cursorSchema = z.object({
-  cursor: z.string().optional(),
+  cursor: z
+    .string()
+    .refine(mongoose.Types.ObjectId.isValid, { message: "Invalid cursor" })
+    .optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
@@ -128,7 +129,36 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam, query: cursorSchema }),
   asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const viewer = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!viewer) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
     const { id } = req.params as z.infer<typeof objectIdParam>;
+
+    const target = await User.findById(id);
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    if (viewer._id.toString() !== id) {
+      // Hide existence from blocked users entirely.
+      if (await isBlocked(viewer._id.toString(), id)) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      // Private accounts gate their feed behind the existing follow rules.
+      if (!target.isPublic) {
+        const allowed = await canViewProfile(viewer._id, target);
+        if (!allowed) {
+          res.status(403).json({ error: "This passport is private." });
+          return;
+        }
+      }
+    }
+
     const { cursor, limit } = req.query as unknown as z.infer<
       typeof cursorSchema
     >;

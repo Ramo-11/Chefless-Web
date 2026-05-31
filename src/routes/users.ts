@@ -21,6 +21,8 @@ import {
   computeSpatulaBadge,
 } from "../services/user-service";
 import { syncUserPremiumFromRevenueCat } from "../services/revenuecat-service";
+import { getBlockedUserIds } from "../services/block-service";
+import { imageDataUri } from "../lib/image-validation";
 
 const router = Router();
 
@@ -69,13 +71,7 @@ const paginationSchema = z.object({
 });
 
 const signatureBodySchema = z.object({
-  image: z
-    .string()
-    .min(1, "Image data is required")
-    .refine(
-      (val) => val.startsWith("data:image/"),
-      { message: "Must be a valid base64 data URI (data:image/...)" }
-    ),
+  image: imageDataUri(),
 });
 
 // --- Routes ---
@@ -88,8 +84,24 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { q } = req.query as z.infer<typeof searchQuerySchema>;
 
+    const firebaseUid = req.user!.uid;
+    const caller = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!caller) {
+      res.status(401).json({ error: "User not found. Please register first." });
+      return;
+    }
+
+    // Exclude users involved in a block relationship with the caller in either
+    // direction, matching the dedicated /api/search route's behavior.
+    const blockedIds = await getBlockedUserIds(caller._id.toString());
+
     const users = await User.find(
-      { $text: { $search: q }, isBanned: { $ne: true } },
+      {
+        $text: { $search: q },
+        isBanned: { $ne: true },
+        _id: { $nin: blockedIds },
+      },
       { score: { $meta: "textScore" } }
     )
       .select(

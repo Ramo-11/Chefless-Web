@@ -63,6 +63,7 @@ const createListSchema = z.object({
         category: z.string().max(50).trim().optional(),
       })
     )
+    .max(200)
     .optional(),
 });
 

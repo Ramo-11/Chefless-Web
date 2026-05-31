@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import User from "../models/User";
 import WebhookEvent from "../models/WebhookEvent";
 import { env } from "../lib/env";
@@ -8,24 +9,39 @@ import { logger } from "../lib/logger";
 const router = Router();
 
 /**
- * RevenueCat webhook event shape.
+ * RevenueCat webhook event schema.
  *
  * `id` is documented in RevenueCat's spec as a unique event identifier and is
  * what we use for idempotency. In the wild, retries of the *same delivery*
  * carry the same id; replays of an in-flight event carry a new one. That
  * matches what we want — reject dupes, accept legit retries.
+ *
+ * Only `type` is strictly required. `app_user_id` is optional: most event
+ * types carry it, but some (e.g. TRANSFER) may omit it, and rejecting those
+ * with a 400 would make RevenueCat retry indefinitely. Instead we accept the
+ * payload and the handler skips events that lack a user id. `.passthrough()`
+ * keeps any extra keys RevenueCat sends so legitimate provider payloads are
+ * never rejected. When `app_user_id` IS present, this guarantees it is a plain
+ * string before it reaches a Mongo filter, so a JSON object (e.g. an injected
+ * query operator) cannot reach a query.
  */
-interface RevenueCatEvent {
-  id?: string;
-  type: string;
-  app_user_id: string;
-  product_id?: string;
-  expiration_at_ms?: number;
-}
+const revenueCatEventSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    type: z.string().min(1),
+    app_user_id: z.string().min(1).optional(),
+    product_id: z.string().optional(),
+    expiration_at_ms: z.number().optional(),
+  })
+  .passthrough();
 
-interface RevenueCatWebhookPayload {
-  event: RevenueCatEvent;
-}
+const revenueCatWebhookSchema = z
+  .object({
+    event: revenueCatEventSchema,
+  })
+  .passthrough();
+
+type RevenueCatWebhookPayload = z.infer<typeof revenueCatWebhookSchema>;
 
 function getPlanFromProductId(
   productId: string | undefined
@@ -66,13 +82,18 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
     return;
   }
 
-  const payload = req.body as RevenueCatWebhookPayload | undefined;
-  const event = payload?.event;
-
-  if (!event || !event.type || !event.app_user_id) {
+  const parsed = revenueCatWebhookSchema.safeParse(req.body);
+  if (!parsed.success) {
+    logger.warn(
+      { issues: parsed.error.issues },
+      "Invalid RevenueCat webhook payload"
+    );
     res.status(400).json({ error: "Invalid webhook payload" });
     return;
   }
+
+  const payload: RevenueCatWebhookPayload = parsed.data;
+  const event = payload.event;
 
   const {
     id: eventId,
@@ -119,6 +140,10 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
     switch (type) {
       case "INITIAL_PURCHASE":
       case "RENEWAL": {
+        if (!appUserId) {
+          logger.warn({ type }, "RevenueCat event missing app_user_id; ignoring");
+          break;
+        }
         const plan = getPlanFromProductId(productId);
         const incomingExpiry = expirationAtMs
           ? new Date(expirationAtMs)
@@ -174,6 +199,10 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
 
       case "CANCELLATION":
       case "EXPIRATION": {
+        if (!appUserId) {
+          logger.warn({ type }, "RevenueCat event missing app_user_id; ignoring");
+          break;
+        }
         await User.updateOne(
           { firebaseUid: appUserId },
           {

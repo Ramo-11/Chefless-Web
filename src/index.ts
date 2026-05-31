@@ -46,6 +46,10 @@ import appConfigRouter from "./routes/app-config";
 const app = express();
 
 // ── Trust proxy (Render runs behind a reverse proxy) ────────────────
+// Assumes EXACTLY ONE trusted proxy (Render's load balancer) sits in front.
+// If this service is ever exposed without that single proxy, req.ip becomes
+// spoofable via the X-Forwarded-For header, which would let an attacker bypass
+// every IP-keyed rate limiter. Keep the count at 1 unless the topology changes.
 app.set("trust proxy", 1);
 
 // ── View engine (EJS for admin panel) ───────────────────────────────
@@ -56,9 +60,39 @@ app.set("views", path.join(__dirname, "views"));
 app.use(express.static(path.join(__dirname, "public")));
 
 // ── Security headers ───────────────────────────────────────────────
+// helmet's own CSP is disabled here because the JSON API serves no HTML and
+// needs no CSP. A real, admin-scoped CSP IS applied below (see adminCsp) to
+// the EJS admin panel mounted at /admin — that is the only HTML surface.
 app.use(helmet({
-  contentSecurityPolicy: false, // CSP managed separately for admin EJS views
+  contentSecurityPolicy: false,
 }));
+
+// ── Content-Security-Policy for the admin panel ─────────────────────
+// Scoped to /admin only (the JSON API renders no HTML and must not receive
+// this header). The admin EJS views rely on inline <script> blocks and a few
+// inline handlers, so 'unsafe-inline' stays in script-src/style-src — a strict
+// nonce-based policy is out of scope and would break the panel. The allow-list
+// below is derived from the external origins actually referenced across
+// src/views/*: Font Awesome CSS + webfonts from cdnjs, Chart.js from jsDelivr,
+// and Cloudinary image URLs stored in the database. Everything else is locked
+// to 'self' so that even an injection that survives output escaping cannot
+// exfiltrate data to an attacker-controlled origin.
+const adminCsp =
+  "default-src 'self'; " +
+  "base-uri 'self'; " +
+  "object-src 'none'; " +
+  "frame-ancestors 'self'; " +
+  "form-action 'self'; " +
+  "connect-src 'self'; " +
+  "img-src 'self' https://res.cloudinary.com data:; " +
+  "font-src 'self' https://cdnjs.cloudflare.com; " +
+  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net";
+
+const adminCspMiddleware: express.RequestHandler = (_req, res, next) => {
+  res.setHeader("Content-Security-Policy", adminCsp);
+  next();
+};
 
 // ── CORS ────────────────────────────────────────────────────────────
 // In production, require an explicit allowlist. If ALLOWED_ORIGINS is empty,
@@ -91,6 +125,9 @@ app.use((req, _res, next) => {
 // Must NOT use a global express.json() or its limit would block larger uploads
 // before the route-specific parser runs.
 const jsonDefault = express.json({ limit: "1mb" });
+// 15mb accommodates base64 image uploads from installed clients (one app path
+// forwards the original, unresized photo). The image schema in
+// lib/image-validation.ts enforces a tighter decoded-byte ceiling per upload.
 const jsonUpload = express.json({ limit: "15mb" });
 
 // ── Session middleware (admin panel only, but applied globally) ──────
@@ -119,7 +156,7 @@ app.use("/", pagesRouter);
 // ── Admin panel (served at /admin) ──────────────────────────────────
 // Admin router needs JSON parsing for adminFetch() POST/PUT calls from the
 // EJS views. urlencoded is already applied globally above for form posts.
-app.use("/admin", jsonDefault, adminRouter);
+app.use("/admin", adminCspMiddleware, jsonDefault, adminRouter);
 
 // ── Webhook routes (no auth — they verify their own secrets) ────────
 // RevenueCat webhooks are authorized by a shared Bearer token (see

@@ -28,10 +28,10 @@
           </div>
         </a>
         <div class="seasonal-card-actions">
-          <button class="btn btn-sm btn-secondary" onclick="toggleTag('<%= tag._id %>')" aria-label="Toggle active">
+          <button class="btn btn-sm btn-secondary" data-id="<%= tag._id %>" onclick="toggleTag(this.dataset.id)" aria-label="Toggle active">
             <i class="fas fa-<%= tag.isActive ? 'pause' : 'play' %>"></i>
           </button>
-          <button class="btn btn-sm btn-danger-outline" onclick="deleteTag('<%= tag._id %>', '<%= tag.name %>')" aria-label="Delete tag">
+          <button class="btn btn-sm btn-danger-outline" data-id="<%= tag._id %>" data-name="<%= tag.name %>" onclick="deleteTag(this.dataset.id, this.dataset.name)" aria-label="Delete tag">
             <i class="fas fa-trash"></i>
           </button>
         </div>
@@ -91,7 +91,7 @@
                 <span class="text-muted text-sm">by <%= recipe.authorId ? recipe.authorId.fullName : 'Unknown' %></span>
               </div>
             </div>
-            <button class="btn btn-sm btn-danger-outline" onclick="untagRecipe('<%= recipe._id %>', '<%= selectedTag %>')" aria-label="Remove tag">
+            <button class="btn btn-sm btn-danger-outline" data-id="<%= recipe._id %>" data-tag="<%= selectedTag %>" onclick="untagRecipe(this.dataset.id, this.dataset.tag)" aria-label="Remove tag">
               <i class="fas fa-times"></i>
             </button>
           </div>
@@ -133,7 +133,7 @@
               </div>
             </div>
             <% if (selectedTag) { %>
-              <button class="btn btn-sm btn-primary" onclick="tagRecipe('<%= recipe._id %>', '<%= selectedTag %>')" aria-label="Add tag">
+              <button class="btn btn-sm btn-primary" data-id="<%= recipe._id %>" data-tag="<%= selectedTag %>" onclick="tagRecipe(this.dataset.id, this.dataset.tag)" aria-label="Add tag">
                 <i class="fas fa-plus"></i> Tag
               </button>
             <% } else { %>

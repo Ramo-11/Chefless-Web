@@ -98,32 +98,32 @@
           <td class="text-muted"><%= user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never' %></td>
           <td>
             <div class="action-buttons">
-              <button class="btn btn-sm btn-secondary" onclick="viewUser('<%= user._id %>')" aria-label="View user details">
+              <button class="btn btn-sm btn-secondary" data-id="<%= user._id %>" onclick="viewUser(this.dataset.id)" aria-label="View user details">
                 <i class="fas fa-eye"></i>
               </button>
-              <button class="btn btn-sm btn-secondary" onclick="editUser('<%= user._id %>')" aria-label="Edit user">
+              <button class="btn btn-sm btn-secondary" data-id="<%= user._id %>" onclick="editUser(this.dataset.id)" aria-label="Edit user">
                 <i class="fas fa-pencil-alt"></i>
               </button>
               <% if (!user.isPremium) { %>
-                <button class="btn btn-sm btn-premium-outline" onclick="showGrantPremiumModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Grant premium">
+                <button class="btn btn-sm btn-premium-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showGrantPremiumModal(this.dataset.id, this.dataset.name)" aria-label="Grant premium">
                   <i class="fas fa-crown"></i>
                 </button>
               <% } else { %>
-                <button class="btn btn-sm btn-warning-outline" onclick="revokePremium('<%= user._id %>', '<%= user.fullName %>')" aria-label="Revoke premium">
+                <button class="btn btn-sm btn-warning-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="revokePremium(this.dataset.id, this.dataset.name)" aria-label="Revoke premium">
                   <i class="fas fa-crown" style="text-decoration: line-through;"></i>
                 </button>
               <% } %>
               <% if (!user.isBanned) { %>
-                <button class="btn btn-sm btn-danger-outline" onclick="showBanModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Ban user">
+                <button class="btn btn-sm btn-danger-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showBanModal(this.dataset.id, this.dataset.name)" aria-label="Ban user">
                   <i class="fas fa-ban"></i>
                 </button>
               <% } else { %>
-                <button class="btn btn-sm btn-success-outline" onclick="unbanUser('<%= user._id %>')" aria-label="Unban user">
+                <button class="btn btn-sm btn-success-outline" data-id="<%= user._id %>" onclick="unbanUser(this.dataset.id)" aria-label="Unban user">
                   <i class="fas fa-check-circle"></i>
                 </button>
               <% } %>
               <% if (!user.isAdmin) { %>
-                <button class="btn btn-sm btn-danger-outline" onclick="showDeleteUserModal('<%= user._id %>', '<%= user.fullName %>')" aria-label="Delete user">
+                <button class="btn btn-sm btn-danger-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showDeleteUserModal(this.dataset.id, this.dataset.name)" aria-label="Delete user">
                   <i class="fas fa-trash"></i>
                 </button>
               <% } %>

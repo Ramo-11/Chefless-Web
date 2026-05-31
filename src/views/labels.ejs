@@ -34,10 +34,10 @@
             <td class="text-muted"><%= label.slug %></td>
             <td>
               <div class="action-buttons">
-                <button class="btn btn-sm btn-primary" onclick="updateLabel('<%= label._id %>')" aria-label="Save">
+                <button class="btn btn-sm btn-primary" data-id="<%= label._id %>" onclick="updateLabel(this.dataset.id)" aria-label="Save">
                   <i class="fas fa-save"></i>
                 </button>
-                <button class="btn btn-sm btn-danger-outline" onclick="deleteLabel('<%= label._id %>', '<%= label.name %>')" aria-label="Delete">
+                <button class="btn btn-sm btn-danger-outline" data-id="<%= label._id %>" data-name="<%= label.name %>" onclick="deleteLabel(this.dataset.id, this.dataset.name)" aria-label="Delete">
                   <i class="fas fa-trash"></i>
                 </button>
               </div>

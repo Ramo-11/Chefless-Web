@@ -73,6 +73,30 @@ function viewForDeleted(
   };
 }
 
+/**
+ * Redacted node for a recipe the viewer is not allowed to open. Preserves the
+ * tree shape (depth + child links) but strips every piece of content the
+ * viewer has no right to see, and nulls `recipeId` so the client cannot
+ * navigate to it.
+ */
+function viewForRedacted(depth: number, childIds: string[]): RemixTreeNode {
+  return {
+    recipeId: null,
+    title: "Private recipe",
+    photoUrl: null,
+    authorId: null,
+    authorName: "Private chef",
+    authorPhoto: null,
+    depth,
+    isAvailable: true,
+    childIds,
+    viewable: false,
+    createdAt: null,
+    likesCount: 0,
+    forksCount: 0,
+  };
+}
+
 function toNode(
   recipe: IRecipe,
   author: { fullName: string; profilePicture?: string | null } | null,
@@ -80,6 +104,10 @@ function toNode(
   childIds: string[],
   viewable: boolean
 ): RemixTreeNode {
+  // Redact content for nodes the viewer cannot open — keep only the tree shape.
+  if (!viewable) {
+    return viewForRedacted(depth, childIds);
+  }
   return {
     recipeId: recipe._id.toString(),
     title: recipe.title,
@@ -245,16 +273,20 @@ export async function getRemixTree(
         viewable
       );
       descendants.push(node);
-      descendantNodeMap.set(node.recipeId as string, node);
+      // Key the internal graph on the REAL recipe id, not the node's exposed
+      // `recipeId` (which is nulled for redacted nodes) so the tree shape and
+      // parent/child links survive redaction.
+      const childIdStr = child._id.toString();
+      descendantNodeMap.set(childIdStr, node);
       nodeCount += 1;
 
       // Append this child to its parent's childIds list.
       const parentIdStr = parentRecipeId.toString();
       if (parentIdStr === focus._id.toString()) {
-        focusChildIds.push(node.recipeId as string);
+        focusChildIds.push(childIdStr);
       } else {
         const parentNode = descendantNodeMap.get(parentIdStr);
-        if (parentNode) parentNode.childIds.push(node.recipeId as string);
+        if (parentNode) parentNode.childIds.push(childIdStr);
       }
 
       queue.push({ recipeId: child._id, depth: parentDepth + 1 });
