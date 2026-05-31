@@ -36,17 +36,64 @@ export interface ImportedRecipe {
   sourceUrl: string;
 }
 
+export type RecipeSourceType =
+  | "website"
+  | "instagram"
+  | "tiktok"
+  | "youtube"
+  | "pinterest"
+  | "facebook"
+  | "other";
+
+/** The provenance subset the client persists alongside an imported recipe. */
+export interface RecipeSourceInfo {
+  type: RecipeSourceType;
+  url: string;
+  siteName?: string;
+  author?: string;
+}
+
+export type ImportErrorCode =
+  | "INVALID_URL"
+  | "UNREACHABLE"
+  | "PRIVATE_OR_BLOCKED"
+  | "NO_CAPTION"
+  | "NO_RECIPE_FOUND"
+  | "TIMEOUT";
+
+/**
+ * Outcome of fetching + parsing an import URL.
+ * - `structured`: the page exposed schema.org/Recipe JSON-LD (free path).
+ * - `caption`: no structured recipe, but a usable caption was extracted and
+ *   should be handed to the AI extractor (gated path).
+ * - `error`: nothing usable; carries a code the route maps to an HTTP status.
+ */
+export type ImportExtractionResult =
+  | { kind: "structured"; recipe: ImportedRecipe; source: RecipeSourceInfo }
+  | { kind: "caption"; text: string; source: RecipeSourceInfo }
+  | { kind: "error"; code: ImportErrorCode };
+
 // ---------------------------------------------------------------------------
-// Main export
+// Main export — stepwise extractor
 // ---------------------------------------------------------------------------
 
 /**
- * Fetches [url] and attempts to extract a schema.org/Recipe definition.
- * Throws a descriptive error if the URL is unreachable or contains no recipe
- * data.
+ * Fetches [url] and decides how the recipe can be imported:
+ *   1. validate (SSRF guard) -> INVALID_URL on failure
+ *   2. fetch (10s timeout) -> TIMEOUT / PRIVATE_OR_BLOCKED / UNREACHABLE
+ *   3. schema.org/Recipe JSON-LD -> structured (free)
+ *   4. else caption (og/twitter/meta description) -> caption (AI path)
+ *   5. else NO_CAPTION
+ * Never throws; all failure paths return `{ kind: "error", code }`.
  */
-export async function importRecipeFromUrl(url: string): Promise<ImportedRecipe> {
-  validateUrl(url);
+export async function extractFromUrl(
+  url: string
+): Promise<ImportExtractionResult> {
+  try {
+    validateUrl(url);
+  } catch {
+    return { kind: "error", code: "INVALID_URL" };
+  }
 
   let html: string;
   try {
@@ -61,24 +108,278 @@ export async function importRecipeFromUrl(url: string): Promise<ImportedRecipe> 
     });
 
     if (!response.ok) {
-      throw new Error(`Page responded with HTTP ${response.status}`);
+      if (response.status === 401 || response.status === 403) {
+        return { kind: "error", code: "PRIVATE_OR_BLOCKED" };
+      }
+      return { kind: "error", code: "UNREACHABLE" };
+    }
+
+    // A redirect to a login wall presents as a 2xx on the auth host.
+    if (isLoginWallUrl(response.url)) {
+      return { kind: "error", code: "PRIVATE_OR_BLOCKED" };
     }
 
     html = await response.text();
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to fetch URL: ${msg}`);
+    if (isTimeoutError(err)) {
+      return { kind: "error", code: "TIMEOUT" };
+    }
+    return { kind: "error", code: "UNREACHABLE" };
+  }
+
+  const source = detectSource(url);
+  if (source.type === "website" && !source.siteName) {
+    const ogSiteName = extractMetaContent(html, "og:site_name");
+    if (ogSiteName) source.siteName = ogSiteName.slice(0, 100);
   }
 
   const schema = extractRecipeSchema(html);
-  if (!schema) {
-    throw new Error(
-      "No recipe data found on that page. The site may not use structured data, " +
-        "or the URL may not point to a recipe."
-    );
+  if (schema) {
+    return { kind: "structured", recipe: mapSchemaToRecipe(schema, url), source };
   }
 
-  return mapSchemaToRecipe(schema, url);
+  const caption = extractCaption(html, source);
+  if (caption) {
+    return {
+      kind: "caption",
+      text: caption.text,
+      source: caption.author ? { ...source, author: caption.author } : source,
+    };
+  }
+
+  return { kind: "error", code: "NO_CAPTION" };
+}
+
+function isTimeoutError(err: unknown): boolean {
+  if (err instanceof Error) {
+    return err.name === "AbortError" || err.name === "TimeoutError";
+  }
+  return false;
+}
+
+function isLoginWallUrl(finalUrl: string): boolean {
+  try {
+    const u = new URL(finalUrl);
+    const path = u.pathname.toLowerCase();
+    return (
+      path.startsWith("/accounts/login") ||
+      path.startsWith("/login") ||
+      path === "/accounts/login/"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Source detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a URL's hostname to a {@link RecipeSourceInfo}. Known social hosts get
+ * a fixed type + display name; everything else is `website` (the caller fills
+ * `siteName` from og:site_name, falling back to the hostname).
+ */
+export function detectSource(url: string): RecipeSourceInfo {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return { type: "other", url };
+  }
+
+  const matches = (domain: string): boolean =>
+    host === domain || host.endsWith(`.${domain}`);
+
+  if (matches("instagram.com")) {
+    return { type: "instagram", url, siteName: "Instagram" };
+  }
+  if (matches("tiktok.com")) {
+    return { type: "tiktok", url, siteName: "TikTok" };
+  }
+  if (matches("youtube.com") || matches("youtu.be")) {
+    return { type: "youtube", url, siteName: "YouTube" };
+  }
+  if (host === "pinterest.com" || host.startsWith("pinterest.")) {
+    return { type: "pinterest", url, siteName: "Pinterest" };
+  }
+  if (matches("facebook.com") || matches("fb.watch")) {
+    return { type: "facebook", url, siteName: "Facebook" };
+  }
+
+  return { type: "website", url, siteName: host || undefined };
+}
+
+// ---------------------------------------------------------------------------
+// Caption extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Pulls a usable caption from page metadata when there is no JSON-LD recipe.
+ * Tries og:description, then twitter:description, then <meta name=description>.
+ * For Instagram, og:description carries an engagement/username prefix and the
+ * real caption wrapped in quotes (e.g.
+ * `123 likes, 45 comments - chef.jane on May 1, 2026: "Best pasta..."`) — this
+ * strips the prefix and unwraps the quote, capturing the handle as `author`.
+ * Returns null when nothing meaningful (>= 15 chars) survives.
+ */
+export function extractCaption(
+  html: string,
+  source: RecipeSourceInfo
+): { text: string; author?: string } | null {
+  const raw =
+    extractMetaContent(html, "og:description") ??
+    extractMetaContent(html, "twitter:description") ??
+    extractMetaNameContent(html, "twitter:description") ??
+    extractMetaNameContent(html, "description");
+
+  if (!raw) return null;
+
+  let text = decodeHtmlEntities(raw).trim();
+  let author: string | undefined;
+
+  if (source.type === "instagram") {
+    const parsed = parseInstagramDescription(text);
+    text = parsed.text;
+    author = parsed.author;
+  }
+
+  if (!author) {
+    const ogTitle = extractMetaContent(html, "og:title");
+    if (ogTitle) {
+      const handle = extractHandle(decodeHtmlEntities(ogTitle));
+      if (handle) author = handle;
+    }
+  }
+
+  text = text.trim();
+  if (text.length < 15) return null;
+
+  return author ? { text: text.slice(0, 12000), author } : { text: text.slice(0, 12000) };
+}
+
+/**
+ * Splits an Instagram og:description into the engagement/username prefix and
+ * the quoted caption. Falls back to the whole string when the shape differs.
+ */
+function parseInstagramDescription(description: string): {
+  text: string;
+  author?: string;
+} {
+  let author: string | undefined;
+
+  // Prefix shape: "<N> likes, <M> comments - <handle> on <date>: ..."
+  const prefixMatch = description.match(
+    /^[\d,.\sKkMm]*likes?,[^-]*-\s*([^:]+?)\s+on\s+[^:]*:\s*([\s\S]*)$/i
+  );
+  if (prefixMatch) {
+    author = extractHandle(prefixMatch[1]) ?? toHandle(prefixMatch[1]);
+    const body = prefixMatch[2].trim();
+    return { text: unwrapQuoted(body), author };
+  }
+
+  // Simpler shape: "<handle> on <date>: ..." (no engagement counts).
+  const handleMatch = description.match(/^([^:]+?)\s+on\s+[^:]*:\s*([\s\S]*)$/i);
+  if (handleMatch) {
+    author = extractHandle(handleMatch[1]) ?? toHandle(handleMatch[1]);
+    const body = handleMatch[2].trim();
+    return { text: unwrapQuoted(body), author };
+  }
+
+  return { text: unwrapQuoted(description), author };
+}
+
+/** Strips a single surrounding pair of straight or curly double quotes. */
+function unwrapQuoted(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^["“]([\s\S]*)["”]$/);
+  if (match) return match[1].trim();
+  return trimmed;
+}
+
+/** Pulls an `@handle` or a bare username token out of a label string. */
+function extractHandle(label: string): string | undefined {
+  const at = label.match(/@([A-Za-z0-9._]+)/);
+  if (at) return `@${at[1]}`;
+  const paren = label.match(/\(@([A-Za-z0-9._]+)\)/);
+  if (paren) return `@${paren[1]}`;
+  return undefined;
+}
+
+/** Normalizes a bare username label into an `@handle`, or undefined if empty. */
+function toHandle(label: string): string | undefined {
+  const trimmed = label.trim();
+  if (!trimmed) return undefined;
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
+const META_PROPERTY_PATTERNS = (key: string): RegExp[] => {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [
+    new RegExp(
+      `<meta[^>]+property=["']${escaped}["'][^>]+content=["']([\\s\\S]*?)["']`,
+      "i"
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([\\s\\S]*?)["'][^>]+property=["']${escaped}["']`,
+      "i"
+    ),
+  ];
+};
+
+/** Reads `<meta property="og:..." content="...">` (either attribute order). */
+function extractMetaContent(html: string, property: string): string | undefined {
+  for (const pattern of META_PROPERTY_PATTERNS(property)) {
+    const match = html.match(pattern);
+    if (match && match[1].trim()) return match[1];
+  }
+  return undefined;
+}
+
+/** Reads `<meta name="description" content="...">` (either attribute order). */
+function extractMetaNameContent(
+  html: string,
+  name: string
+): string | undefined {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(
+      `<meta[^>]+name=["']${escaped}["'][^>]+content=["']([\\s\\S]*?)["']`,
+      "i"
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([\\s\\S]*?)["'][^>]+name=["']${escaped}["']`,
+      "i"
+    ),
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match && match[1].trim()) return match[1];
+  }
+  return undefined;
+}
+
+const HTML_ENTITIES: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&#x27;": "'",
+  "&apos;": "'",
+  "&nbsp;": " ",
+};
+
+/** Decodes the small set of HTML entities that show up in meta content. */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, dec: string) =>
+      String.fromCodePoint(Number.parseInt(dec, 10))
+    )
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16))
+    )
+    .replace(/&[a-z]+;/gi, (entity) => HTML_ENTITIES[entity.toLowerCase()] ?? entity);
 }
 
 // ---------------------------------------------------------------------------

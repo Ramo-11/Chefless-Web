@@ -1,5 +1,5 @@
 import { Types, FilterQuery } from "mongoose";
-import Recipe, { IRecipe, IIngredient, IStep } from "../models/Recipe";
+import Recipe, { IRecipe, IIngredient, IStep, IRecipeSource } from "../models/Recipe";
 import Like from "../models/Like";
 import SavedRecipe from "../models/SavedRecipe";
 import RecipeShare from "../models/RecipeShare";
@@ -64,6 +64,7 @@ interface CreateRecipeData {
   costEstimate?: "budget" | "moderate" | "expensive";
   baseServings?: number;
   isPrivate?: boolean;
+  source?: IRecipeSource;
 }
 
 interface UpdateRecipeData {
@@ -325,6 +326,7 @@ export async function createRecipe(
       costEstimate: data.costEstimate,
       baseServings: data.baseServings ?? 1,
       isPrivate: data.isPrivate ?? false,
+      source: data.source,
     });
     return recipe;
   } catch (err) {

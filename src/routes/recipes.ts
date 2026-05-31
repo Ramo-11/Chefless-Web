@@ -29,7 +29,17 @@ import {
   getRatingAggregateForViewer,
   getKitchenCookHistoryForRecipe,
 } from "../services/rating-service";
-import { importRecipeFromUrl } from "../services/recipe-import-service";
+import {
+  extractFromUrl,
+  detectSource,
+  type ImportErrorCode,
+} from "../services/recipe-import-service";
+import {
+  assertImportAllowed,
+  recordImportUsage,
+  aiExtractRecipeFromCaption,
+  getAiUsage,
+} from "../services/ai-recipe-service";
 
 const router = Router();
 
@@ -71,6 +81,22 @@ const stepSchema = z.object({
   photo: z.string().url().optional(),
 });
 
+const recipeSourceSchema = z.object({
+  type: z.enum([
+    "website",
+    "instagram",
+    "tiktok",
+    "youtube",
+    "pinterest",
+    "facebook",
+    "other",
+  ]),
+  url: z.string().url().max(2048),
+  siteName: z.string().max(100).optional(),
+  author: z.string().max(100).optional(),
+  importedVia: z.enum(["structured", "ai"]),
+});
+
 const createRecipeSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
   description: z.string().max(2000).optional(),
@@ -91,6 +117,7 @@ const createRecipeSchema = z.object({
   costEstimate: z.enum(["budget", "moderate", "expensive"]).optional(),
   baseServings: z.number().int().min(1).optional(),
   isPrivate: z.boolean().optional(),
+  source: recipeSourceSchema.optional(),
 });
 
 const updateRecipeSchema = z.object({
@@ -636,6 +663,8 @@ function isSafeImportUrl(url: string): boolean {
   }
 }
 
+const timezoneOffsetField = z.number().int().min(-840).max(840).optional();
+
 const importRecipeSchema = z.object({
   url: z
     .string()
@@ -644,20 +673,131 @@ const importRecipeSchema = z.object({
     .refine(isSafeImportUrl, {
       message: "URL must be a public HTTP/HTTPS address",
     }),
+  timezoneOffsetMinutes: timezoneOffsetField,
 });
 
+const importFromTextSchema = z.object({
+  text: z.string().min(1).max(12000),
+  sourceUrl: z.string().url().max(2048).optional(),
+  timezoneOffsetMinutes: timezoneOffsetField,
+});
+
+/** Maps an extractor error code to the HTTP status the client expects. */
+const IMPORT_ERROR_STATUS: Record<ImportErrorCode, number> = {
+  INVALID_URL: 400,
+  UNREACHABLE: 502,
+  PRIVATE_OR_BLOCKED: 422,
+  NO_CAPTION: 422,
+  NO_RECIPE_FOUND: 422,
+  TIMEOUT: 504,
+};
+
+const IMPORT_ERROR_MESSAGE: Record<ImportErrorCode, string> = {
+  INVALID_URL: "That link does not look right.",
+  UNREACHABLE: "We could not open that page.",
+  PRIVATE_OR_BLOCKED: "This post is private, so we cannot read it.",
+  NO_CAPTION: "There is no caption to read on that post.",
+  NO_RECIPE_FOUND: "We could not find a recipe here.",
+  TIMEOUT: "That took too long. Please try again.",
+};
+
 // POST /api/recipes/import — Fetch and parse a recipe from an external URL.
-// Returns pre-fill data for the creation form; does NOT create a recipe.
+// Structured (JSON-LD) results are free; social captions go through the gated
+// AI extractor. Returns pre-fill data for the creation form; does NOT save.
 router.post(
   "/import",
   requireAuth,
   validate({ body: importRecipeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const { url } = req.body as z.infer<typeof importRecipeSchema>;
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
 
-    const recipe = await importRecipeFromUrl(url);
+    const { url, timezoneOffsetMinutes: tz } =
+      req.body as z.infer<typeof importRecipeSchema>;
 
-    res.status(200).json({ recipe });
+    const result = await extractFromUrl(url);
+
+    if (result.kind === "error") {
+      res.status(IMPORT_ERROR_STATUS[result.code]).json({
+        code: result.code,
+        error: IMPORT_ERROR_MESSAGE[result.code],
+      });
+      return;
+    }
+
+    if (result.kind === "structured") {
+      res.status(200).json({
+        recipe: result.recipe,
+        source: { ...result.source, importedVia: "structured" as const },
+      });
+      return;
+    }
+
+    // Caption path — gated AI extraction.
+    const userId = user._id.toString();
+    await assertImportAllowed(userId, tz);
+
+    const recipe = await aiExtractRecipeFromCaption(result.text, url);
+    if (!recipe) {
+      res.status(IMPORT_ERROR_STATUS.NO_RECIPE_FOUND).json({
+        code: "NO_RECIPE_FOUND",
+        error: IMPORT_ERROR_MESSAGE.NO_RECIPE_FOUND,
+      });
+      return;
+    }
+
+    await recordImportUsage(userId, tz);
+    const usage = await getAiUsage(userId, tz).catch(() => undefined);
+
+    res.status(200).json({
+      recipe,
+      source: { ...result.source, importedVia: "ai" as const },
+      usage,
+    });
+  })
+);
+
+// POST /api/recipes/import/from-text — Manual-paste fallback. Runs the same
+// gated AI extractor over a caption the user pasted in by hand.
+router.post(
+  "/import/from-text",
+  requireAuth,
+  validate({ body: importFromTextSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { text, sourceUrl, timezoneOffsetMinutes: tz } =
+      req.body as z.infer<typeof importFromTextSchema>;
+
+    const userId = user._id.toString();
+    await assertImportAllowed(userId, tz);
+
+    const recipe = await aiExtractRecipeFromCaption(text, sourceUrl ?? "");
+    if (!recipe) {
+      res.status(IMPORT_ERROR_STATUS.NO_RECIPE_FOUND).json({
+        code: "NO_RECIPE_FOUND",
+        error: IMPORT_ERROR_MESSAGE.NO_RECIPE_FOUND,
+      });
+      return;
+    }
+
+    await recordImportUsage(userId, tz);
+    const usage = await getAiUsage(userId, tz).catch(() => undefined);
+
+    const source = sourceUrl
+      ? { ...detectSource(sourceUrl), importedVia: "ai" as const }
+      : { type: "other" as const, url: sourceUrl ?? "", importedVia: "ai" as const };
+
+    res.status(200).json({ recipe, source, usage });
   })
 );
 

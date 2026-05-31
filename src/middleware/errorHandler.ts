@@ -5,6 +5,12 @@ import { logger } from "../lib/logger";
 
 interface AppError extends Error {
   statusCode?: number;
+  /**
+   * Optional machine-readable error code (e.g. "AI_TRIAL_USED"). Surfaced to
+   * the client alongside the message so the app can map specific failures to
+   * tailored UX. Distinct from Mongo's numeric duplicate-key `code` (11000).
+   */
+  code?: string | number;
 }
 
 /**
@@ -95,9 +101,14 @@ export function errorHandler(
     return;
   }
 
-  // Custom app errors with status code
+  // Custom app errors with status code. Pass through a string `code` when
+  // present so the client can branch on it (numeric Mongo codes are excluded).
   if (err.statusCode) {
-    res.status(err.statusCode).json({ error: err.message });
+    const body: { error: string; code?: string } = { error: err.message };
+    if (typeof err.code === "string") {
+      body.code = err.code;
+    }
+    res.status(err.statusCode).json(body);
     return;
   }
 

@@ -130,6 +130,13 @@ export interface IUser extends Document {
   /** Timestamp of the most recent successful AI call. */
   aiLastUsedAt?: Date;
   /**
+   * True once a free (non-premium) user has spent their one lifetime
+   * AI-powered recipe import. The structured (JSON-LD) website path is always
+   * free and never sets this. Premium users are gated by the daily AI quota
+   * instead and never flip this flag.
+   */
+  freeAiImportUsed: boolean;
+  /**
    * True for synthetic accounts created by the seed-data pipeline. Seed users
    * have unusable Firebase UIDs (`seed-{cuisine}-{n}`) and exist solely to
    * populate the discovery feed during early launch. Visible-only on the
@@ -298,6 +305,7 @@ const userSchema = new Schema<IUser>(
     aiSubstitutionsCount: { type: Number, default: 0 },
     aiFormatCount: { type: Number, default: 0 },
     aiLastUsedAt: { type: Date },
+    freeAiImportUsed: { type: Boolean, default: false },
     isSeed: { type: Boolean, default: false, index: true },
     seedSource: { type: String, enum: ["themealdb", "curated"] },
     seedCuisine: { type: String, index: true },

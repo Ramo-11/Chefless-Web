@@ -20,6 +20,29 @@ export interface IForkedFrom {
   authorName: string;
 }
 
+export type RecipeSourceType =
+  | "website"
+  | "instagram"
+  | "tiktok"
+  | "youtube"
+  | "pinterest"
+  | "facebook"
+  | "other";
+
+/**
+ * External provenance for an imported recipe. Drives the "Imported from {site}"
+ * badge on the recipe detail screen, which links back to the original post.
+ * `importedVia` records whether the recipe came from structured JSON-LD (free)
+ * or from an AI pass over a social caption.
+ */
+export interface IRecipeSource {
+  type: RecipeSourceType;
+  url: string;
+  siteName?: string;
+  author?: string;
+  importedVia: "structured" | "ai";
+}
+
 export interface IRecipe extends Document {
   _id: Types.ObjectId;
   authorId: Types.ObjectId;
@@ -43,6 +66,8 @@ export interface IRecipe extends Document {
   costEstimate?: "budget" | "moderate" | "expensive";
   baseServings: number;
   forkedFrom?: IForkedFrom;
+  /** Set when the recipe was imported from an external URL (website or social post). */
+  source?: IRecipeSource;
   /**
    * Snapshot of the origin author's signature image at the moment this remix
    * was created. Preserved on the remix document itself so the original chef's
@@ -109,6 +134,33 @@ const forkedFromSchema = new Schema<IForkedFrom>(
       default: null,
     },
     authorName: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const recipeSourceSchema = new Schema<IRecipeSource>(
+  {
+    type: {
+      type: String,
+      required: true,
+      enum: [
+        "website",
+        "instagram",
+        "tiktok",
+        "youtube",
+        "pinterest",
+        "facebook",
+        "other",
+      ],
+    },
+    url: { type: String, required: true, trim: true },
+    siteName: { type: String, trim: true },
+    author: { type: String, trim: true },
+    importedVia: {
+      type: String,
+      required: true,
+      enum: ["structured", "ai"],
+    },
   },
   { _id: false }
 );
@@ -198,6 +250,9 @@ const recipeSchema = new Schema<IRecipe>(
     },
     forkedFrom: {
       type: forkedFromSchema,
+    },
+    source: {
+      type: recipeSourceSchema,
     },
     originalSignatureUrl: {
       type: String,
