@@ -31,6 +31,13 @@ export interface IScheduleEntry extends Document {
   ratingPromptSkippedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Response-only flag (never persisted, not in the schema). Set to `true` when
+   * the API withholds an entry's content from a free user because it falls on a
+   * premium-locked future day — the client then renders an existence-only
+   * "locked" teaser. See `redactLockedEntriesForFree` in schedule-service.
+   */
+  locked?: boolean;
 }
 
 const scheduleEntrySchema = new Schema<IScheduleEntry>(

@@ -62,6 +62,44 @@ function isBeyondFreeTierScheduleLimit(date: Date): boolean {
 const FREE_TIER_SCHEDULE_LIMIT_MESSAGE =
   "Free tier users can plan within 2 days before and 2 days after today. Upgrade to premium for full calendar scheduling.";
 
+/**
+ * Withholds meal content from a free user for entries that fall on a
+ * premium-locked *future* day (more than 2 days ahead). The free user still
+ * learns that a meal exists on that day (so the schedule and suggestion inbox
+ * can show a "locked" teaser) but never receives the recipe title, photo,
+ * freeform note, timing, or who suggested it. Past-locked days are left intact
+ * so users can still view, rate, and tidy recent history.
+ *
+ * Mutates the lean entries in place — they are request-scoped response objects.
+ */
+export function redactLockedEntriesForFree(
+  entries: IScheduleEntry[],
+  isPremium: boolean
+): IScheduleEntry[] {
+  if (isPremium) {
+    return entries;
+  }
+  const { max } = freeTierScheduleWindowUtc();
+  for (const entry of entries) {
+    if (stripTime(entry.date) <= max) {
+      continue;
+    }
+    entry.recipeId = undefined;
+    entry.recipeTitle = undefined;
+    entry.recipePhoto = undefined;
+    entry.recipeAuthorId = undefined;
+    entry.recipeAuthorName = undefined;
+    entry.freeformText = undefined;
+    entry.scheduledTime = undefined;
+    entry.prepTime = undefined;
+    entry.suggestedBy = undefined;
+    entry.confirmedBy = undefined;
+    entry.cookedAt = undefined;
+    entry.locked = true;
+  }
+  return entries;
+}
+
 interface AddEntryData {
   date: Date;
   mealSlot: string;

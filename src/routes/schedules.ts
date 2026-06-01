@@ -13,11 +13,13 @@ import {
   approveSuggestion,
   denySuggestion,
   importToKitchen,
+  redactLockedEntriesForFree,
 } from "../services/schedule-service";
 import {
   markEntryCooked,
   clearEntryCooked,
 } from "../services/rating-service";
+import { hasActivePremium } from "../lib/premium";
 
 const router = Router();
 
@@ -130,7 +132,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const firebaseUid = req.user!.uid;
     const currentUser = await User.findOne({ firebaseUid })
-      .select("_id kitchenId")
+      .select("_id kitchenId isPremium premiumExpiresAt")
       .lean();
 
     if (!currentUser) {
@@ -145,9 +147,12 @@ router.get(
       return;
     }
 
-    const suggestions = await getSuggestions(
-      currentUser._id.toString(),
-      currentUser.kitchenId.toString()
+    const suggestions = redactLockedEntriesForFree(
+      await getSuggestions(
+        currentUser._id.toString(),
+        currentUser.kitchenId.toString()
+      ),
+      hasActivePremium(currentUser)
     );
 
     res.status(200).json({ suggestions });
@@ -222,7 +227,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const firebaseUid = req.user!.uid;
     const currentUser = await User.findOne({ firebaseUid })
-      .select("_id kitchenId")
+      .select("_id kitchenId isPremium premiumExpiresAt")
       .lean();
 
     if (!currentUser) {
@@ -238,7 +243,10 @@ router.get(
       ? { kitchenId: currentUser.kitchenId.toString() }
       : { userId: currentUser._id.toString() };
 
-    const entries = await getEntries(query, start, end);
+    const entries = redactLockedEntriesForFree(
+      await getEntries(query, start, end),
+      hasActivePremium(currentUser)
+    );
 
     res.status(200).json({ entries });
   })
