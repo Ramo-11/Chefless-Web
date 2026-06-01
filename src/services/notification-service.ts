@@ -158,11 +158,17 @@ export async function createNotification(
       pushData.route = route;
     }
 
+    // Badge the app icon with the recipient's true unread count (which now
+    // includes the notification just created) rather than a hardcoded 1, so
+    // iOS shows an accurate number and the client can clear it on read.
+    const unreadCount = await getUnreadCount(params.userId.toString());
+
     sendPushNotification(
       user.fcmToken,
       params.pushTitle,
       params.pushBody,
-      pushData
+      pushData,
+      unreadCount
     ).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : "Unknown error";
       console.error(`Push notification failed: ${msg}`);

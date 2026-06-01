@@ -509,7 +509,9 @@ export async function forYouFeed(
         },
       },
     },
-    { $sort: { _score: -1 } },
+    // Real (non-seed) recipes rank ahead of seed recipes, then by score.
+    // `isSeed` sorts ascending: missing/false (real) before true (seed).
+    { $sort: { isSeed: 1, _score: -1 } },
     // Paginate via $facet
     {
       $facet: {
@@ -586,7 +588,8 @@ export async function trendingFeed(
     Recipe.aggregate([
       { $match: baseMatch },
       ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
-      { $sort: { likesCount: -1, forksCount: -1 } },
+      // Real (non-seed) recipes rank ahead of seed recipes, then by engagement.
+      { $sort: { isSeed: 1, likesCount: -1, forksCount: -1 } },
       {
         $facet: {
           data: [{ $skip: skip }, { $limit: limit }],
@@ -665,7 +668,8 @@ export async function friendsFeed(
 
   const [recipes, baseTotal, featured] = await Promise.all([
     Recipe.find(filter)
-      .sort({ createdAt: -1 })
+      // Real (non-seed) recipes rank ahead of seed recipes, then newest first.
+      .sort({ isSeed: 1, createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
@@ -738,7 +742,8 @@ export async function seasonalFeed(
     Recipe.aggregate([
       { $match: baseMatch },
       ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
-      { $sort: { likesCount: -1, createdAt: -1 } },
+      // Real (non-seed) recipes rank ahead of seed recipes.
+      { $sort: { isSeed: 1, likesCount: -1, createdAt: -1 } },
       {
         $facet: {
           data: [{ $skip: skip }, { $limit: limit }],

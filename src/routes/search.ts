@@ -266,7 +266,16 @@ async function searchRecipes(
         },
       },
     },
-    { $sort: { _relevance: -1 as const, likesCount: -1 as const, createdAt: -1 as const } },
+    // Real (non-seed) recipes rank ahead of seed recipes, then by relevance.
+    // `isSeed` sorts ascending: missing/false (real) before true (seed).
+    {
+      $sort: {
+        isSeed: 1 as const,
+        _relevance: -1 as const,
+        likesCount: -1 as const,
+        createdAt: -1 as const,
+      },
+    },
     // Cap documents flowing into facet to prevent memory exhaustion
     { $limit: Math.min(page * limit, 1000) },
     {
@@ -423,7 +432,14 @@ async function searchUsers(
         },
       },
     },
-    { $sort: { _relevance: -1 as const, followersCount: -1 as const } },
+    // Real (non-seed) users rank ahead of seed users, then by relevance.
+    {
+      $sort: {
+        isSeed: 1 as const,
+        _relevance: -1 as const,
+        followersCount: -1 as const,
+      },
+    },
     // Cap documents flowing into facet to prevent memory exhaustion
     { $limit: Math.min(page * limit, 1000) },
     {

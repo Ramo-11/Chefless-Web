@@ -17,12 +17,16 @@ interface PushData {
  * user document so we don't waste future attempts.
  *
  * Errors are logged but never thrown — push failures must not break the caller.
+ *
+ * `badge` sets the iOS app-icon badge to the recipient's true unread count.
+ * When omitted it falls back to 1 so a lone push still surfaces a badge.
  */
 export async function sendPushNotification(
   fcmToken: string,
   title: string,
   body: string,
-  data?: PushData
+  data?: PushData,
+  badge?: number
 ): Promise<void> {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     console.error(
@@ -55,7 +59,7 @@ export async function sendPushNotification(
             aps: {
               alert: { title, body },
               sound: "default",
-              badge: 1,
+              badge: typeof badge === "number" ? Math.max(0, badge) : 1,
               "mutable-content": 1,
             },
           },
