@@ -30,6 +30,7 @@ export interface NotificationPreferences {
   recipe_cooked: boolean;
   cooked_post_removed: boolean;
   passport_stamp: boolean;
+  kitchen_food_ready: boolean;
   system: boolean;
 }
 
@@ -54,6 +55,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   recipe_cooked: true,
   cooked_post_removed: true,
   passport_stamp: true,
+  kitchen_food_ready: true,
   system: true,
 };
 
@@ -88,6 +90,13 @@ export interface IUser extends Document {
   shippingAddress?: ShippingAddress;
   dietaryPreferences?: string[];
   cuisinePreferences?: string[];
+  /**
+   * App display language (ISO 639-1). The cross-device sync source — the
+   * device-side SharedPreferences cache is what actually renders the UI. New
+   * users default to English; the device locale is intentionally not
+   * auto-detected.
+   */
+  language: "en" | "ar" | "tr" | "es";
   onboardingComplete: boolean;
   fcmToken?: string;
   /**
@@ -129,13 +138,6 @@ export interface IUser extends Document {
   aiFormatCount?: number;
   /** Timestamp of the most recent successful AI call. */
   aiLastUsedAt?: Date;
-  /**
-   * True once a free (non-premium) user has spent their one lifetime
-   * AI-powered recipe import. The structured (JSON-LD) website path is always
-   * free and never sets this. Premium users are gated by the daily AI quota
-   * instead and never flip this flag.
-   */
-  freeAiImportUsed: boolean;
   /**
    * True for synthetic accounts created by the seed-data pipeline. Seed users
    * have unusable Firebase UIDs (`seed-{cuisine}-{n}`) and exist solely to
@@ -244,6 +246,11 @@ const userSchema = new Schema<IUser>(
     shippingAddress: { type: shippingAddressSchema },
     dietaryPreferences: [{ type: String }],
     cuisinePreferences: [{ type: String }],
+    language: {
+      type: String,
+      enum: ["en", "ar", "tr", "es"],
+      default: "en",
+    },
     onboardingComplete: {
       type: Boolean,
       default: false,
@@ -276,6 +283,7 @@ const userSchema = new Schema<IUser>(
         recipe_cooked: { type: Boolean, default: true },
         cooked_post_removed: { type: Boolean, default: true },
         passport_stamp: { type: Boolean, default: true },
+        kitchen_food_ready: { type: Boolean, default: true },
         system: { type: Boolean, default: true },
       },
       default: () => ({ ...DEFAULT_NOTIFICATION_PREFERENCES }),
@@ -305,7 +313,6 @@ const userSchema = new Schema<IUser>(
     aiSubstitutionsCount: { type: Number, default: 0 },
     aiFormatCount: { type: Number, default: 0 },
     aiLastUsedAt: { type: Date },
-    freeAiImportUsed: { type: Boolean, default: false },
     isSeed: { type: Boolean, default: false, index: true },
     seedSource: { type: String, enum: ["themealdb", "curated"] },
     seedCuisine: { type: String, index: true },

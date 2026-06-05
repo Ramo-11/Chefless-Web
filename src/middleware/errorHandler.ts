@@ -6,7 +6,7 @@ import { logger } from "../lib/logger";
 interface AppError extends Error {
   statusCode?: number;
   /**
-   * Optional machine-readable error code (e.g. "AI_TRIAL_USED"). Surfaced to
+   * Optional machine-readable error code (e.g. "RECIPE_LIMIT_REACHED"). Surfaced to
    * the client alongside the message so the app can map specific failures to
    * tailored UX. Distinct from Mongo's numeric duplicate-key `code` (11000).
    */

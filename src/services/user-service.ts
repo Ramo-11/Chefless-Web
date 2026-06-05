@@ -123,6 +123,7 @@ export async function getUserById(
     delete userObj.bannedAt;
     delete userObj.notificationPreferences;
     delete userObj.isAdmin;
+    delete userObj.language;
   }
   return { ...userObj, spatulaBadge: badge };
 }
@@ -136,6 +137,7 @@ interface ProfileUpdates {
   cuisinePreferences?: string[];
   profilePicture?: string | null;
   onboardingComplete?: boolean;
+  language?: "en" | "ar" | "tr" | "es";
 }
 
 export async function updateProfile(

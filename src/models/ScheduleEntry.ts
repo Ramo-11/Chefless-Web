@@ -1,5 +1,13 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
+/** A member's dinner-attendance response on a kitchen schedule entry. */
+export type RsvpStatus = "going" | "not_going";
+
+export interface IScheduleRsvp {
+  userId: Types.ObjectId;
+  status: RsvpStatus;
+}
+
 export interface IScheduleEntry extends Document {
   _id: Types.ObjectId;
   kitchenId?: Types.ObjectId;
@@ -17,6 +25,12 @@ export interface IScheduleEntry extends Document {
   status: "confirmed" | "suggested";
   suggestedBy?: Types.ObjectId;
   confirmedBy?: Types.ObjectId;
+  /**
+   * Per-member dinner RSVPs. Only meaningful on kitchen entries (where
+   * `kitchenId` is set) — personal entries never collect RSVPs. Each member
+   * appears at most once; clearing an RSVP removes their entry.
+   */
+  rsvps: IScheduleRsvp[];
   /**
    * Timestamp when the user marked this entry as cooked. Null while pending.
    * Orthogonal to `status` — a confirmed plan only becomes a cooked plan
@@ -99,6 +113,26 @@ const scheduleEntrySchema = new Schema<IScheduleEntry>(
     confirmedBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
+    },
+    rsvps: {
+      type: [
+        new Schema<IScheduleRsvp>(
+          {
+            userId: {
+              type: Schema.Types.ObjectId,
+              ref: "User",
+              required: true,
+            },
+            status: {
+              type: String,
+              enum: ["going", "not_going"],
+              required: true,
+            },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
     },
     cookedAt: {
       type: Date,

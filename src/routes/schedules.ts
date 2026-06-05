@@ -14,6 +14,7 @@ import {
   denySuggestion,
   importToKitchen,
   redactLockedEntriesForFree,
+  setEntryRsvp,
 } from "../services/schedule-service";
 import {
   markEntryCooked,
@@ -123,6 +124,11 @@ const updateEntrySchema = z
     { message: "At least one field must be provided for update" }
   );
 
+// RSVP body. `status: null` clears the member's RSVP (a toggle-off).
+const rsvpSchema = z.object({
+  status: z.enum(["going", "not_going"]).nullable(),
+});
+
 // --- Routes ---
 
 // GET /api/schedule/suggestions — Get pending suggestions (must be before /:id)
@@ -216,6 +222,30 @@ router.post(
     await denySuggestion(currentUser._id.toString(), id);
 
     res.status(200).json({ success: true });
+  })
+);
+
+// POST /api/schedule/:id/rsvp — Set or clear the member's dinner RSVP
+router.post(
+  "/:id/rsvp",
+  requireAuth,
+  validate({ params: objectIdParam, body: rsvpSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid })
+      .select("_id")
+      .lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const { status } = req.body as z.infer<typeof rsvpSchema>;
+    const entry = await setEntryRsvp(currentUser._id.toString(), id, status);
+
+    res.status(200).json({ entry });
   })
 );
 

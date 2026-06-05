@@ -79,6 +79,12 @@ export interface IKitchen extends Document {
    * persisted now so the lead can opt out before rollout.
    */
   allowAutoScheduleSuggestions: boolean;
+  /**
+   * Last time the lead fired a "food is ready" announcement. Used to enforce a
+   * short cooldown so the alert cannot be spammed at kitchen members. Undefined
+   * until the first announcement.
+   */
+  foodReadyNotifiedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -189,6 +195,9 @@ const kitchenSchema = new Schema<IKitchen>(
     allowAutoScheduleSuggestions: {
       type: Boolean,
       default: true,
+    },
+    foodReadyNotifiedAt: {
+      type: Date,
     },
   },
   {

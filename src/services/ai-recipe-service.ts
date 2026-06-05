@@ -3,9 +3,17 @@ import { z } from "zod";
 import User from "../models/User";
 import { env } from "../lib/env";
 import { hasActivePremium } from "../lib/premium";
+import { FREE_TIER_RECIPE_LIMIT } from "./recipe-service";
 import type { ImportedRecipe, ImportedIngredient, ImportedStep } from "./recipe-import-service";
 
 const AI_DAILY_LIMIT = 20;
+
+/**
+ * Per-day ceiling on free AI recipe imports. The product limit is the
+ * {@link FREE_TIER_RECIPE_LIMIT} recipe cap; this is only an anti-abuse guard
+ * because each import runs (and bills) a Claude read BEFORE the recipe is saved.
+ */
+const FREE_IMPORT_DAILY_LIMIT = 10;
 
 const ingredientSchema = z.object({
   name: z.string(),
@@ -417,22 +425,30 @@ export async function aiExtractRecipeFromCaption(
 }
 
 // ---------------------------------------------------------------------------
-// Import gating (free lifetime trial -> premium daily quota)
+// Import gating (free: recipe-count cap + daily anti-abuse -> premium daily quota)
 // ---------------------------------------------------------------------------
 
 /**
- * Enforces the AI-import gate WITHOUT consuming it. Premium users fall through
- * to the existing daily quota check; free users are allowed exactly once
- * (lifetime). Throws a 402 `{ code: "AI_TRIAL_USED" }` once the free trial is
- * spent. The flag is only flipped later by {@link recordImportUsage} after a
- * successful extraction, so a failed import does not burn the trial.
+ * Enforces the AI-import gate WITHOUT consuming it.
+ *
+ * Premium users fall through to the existing daily quota check. For free users
+ * the import feature itself is not the restriction — the recipe count is: they
+ * may keep importing until originals + saved reach {@link FREE_TIER_RECIPE_LIMIT}
+ * (throws 403 `RECIPE_LIMIT_REACHED`, matching the create/save cap). A separate
+ * per-day ceiling ({@link FREE_IMPORT_DAILY_LIMIT}, 429 `AI_QUOTA_EXCEEDED`)
+ * guards against re-running the billable AI read without ever saving.
+ *
+ * The daily counter is only advanced later by {@link recordImportUsage} after a
+ * successful extraction, so a failed import does not burn the cap.
  */
 export async function assertImportAllowed(
   userId: string,
   offsetOverride?: number | null
 ): Promise<void> {
   const user = await User.findById(userId)
-    .select("isPremium premiumExpiresAt freeAiImportUsed")
+    .select(
+      "isPremium premiumExpiresAt originalRecipesCount savedRecipesCount aiRecipeHelperUsageDay aiRecipeHelperUsageCount timezoneOffsetMinutes"
+    )
     .lean();
   if (!user) {
     throw createError("User not found", 404);
@@ -443,38 +459,41 @@ export async function assertImportAllowed(
     return;
   }
 
-  if (user.freeAiImportUsed === true) {
+  const recipeCount =
+    (user.originalRecipesCount ?? 0) + (user.savedRecipesCount ?? 0);
+  if (recipeCount >= FREE_TIER_RECIPE_LIMIT) {
     throw createError(
-      "Your free recipe import has been used. Upgrade to premium for unlimited imports.",
-      402,
-      "AI_TRIAL_USED"
+      `Free accounts can have ${FREE_TIER_RECIPE_LIMIT} recipes total. Upgrade to premium for unlimited recipes.`,
+      403,
+      "RECIPE_LIMIT_REACHED"
+    );
+  }
+
+  const offset =
+    normalizeOffset(offsetOverride) ?? user.timezoneOffsetMinutes ?? undefined;
+  const day = localDayKey(offset);
+  const usedToday =
+    user.aiRecipeHelperUsageDay === day
+      ? user.aiRecipeHelperUsageCount ?? 0
+      : 0;
+  if (usedToday >= FREE_IMPORT_DAILY_LIMIT) {
+    throw createError(
+      `Daily import limit reached (${FREE_IMPORT_DAILY_LIMIT}). Try again tomorrow.`,
+      429,
+      "AI_QUOTA_EXCEEDED"
     );
   }
 }
 
 /**
- * Records a successful AI import. Premium users go through the existing daily
- * usage counters (recorded as the `generate` feature); free users have their
- * one-time trial flag flipped atomically and `aiLastUsedAt` stamped.
+ * Records a successful AI import by advancing the shared daily AI counter (as
+ * the `generate` feature) and stamping `aiLastUsedAt`. Free users are bounded
+ * by {@link FREE_IMPORT_DAILY_LIMIT} and premium users by {@link AI_DAILY_LIMIT}
+ * — both read the same `aiRecipeHelperUsageCount`, only the ceiling differs.
  */
 export async function recordImportUsage(
   userId: string,
   offsetOverride?: number | null
 ): Promise<void> {
-  const user = await User.findById(userId)
-    .select("isPremium premiumExpiresAt")
-    .lean();
-  if (!user) {
-    throw createError("User not found", 404);
-  }
-
-  if (hasActivePremium(user)) {
-    await recordAiUsage(userId, "generate", offsetOverride);
-    return;
-  }
-
-  await User.updateOne(
-    { _id: userId },
-    { $set: { freeAiImportUsed: true, aiLastUsedAt: new Date() } }
-  );
+  await recordAiUsage(userId, "generate", offsetOverride);
 }

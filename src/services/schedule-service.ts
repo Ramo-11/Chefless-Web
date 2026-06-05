@@ -1,5 +1,8 @@
 import { Types } from "mongoose";
-import ScheduleEntry, { IScheduleEntry } from "../models/ScheduleEntry";
+import ScheduleEntry, {
+  IScheduleEntry,
+  RsvpStatus,
+} from "../models/ScheduleEntry";
 import Kitchen from "../models/Kitchen";
 import Recipe from "../models/Recipe";
 import User, { IUser } from "../models/User";
@@ -692,4 +695,52 @@ export async function importToKitchen(
   }
 
   return result.length;
+}
+
+/**
+ * Set (or clear, when `status` is null) the calling member's dinner RSVP on a
+ * kitchen schedule entry. Any kitchen member may RSVP; personal entries cannot
+ * collect RSVPs. Replaces the member's previous response so each member is
+ * counted once. Returns the updated entry with the full `rsvps` array.
+ */
+export async function setEntryRsvp(
+  userId: string,
+  entryId: string,
+  status: RsvpStatus | null
+): Promise<IScheduleEntry> {
+  const entry = await ScheduleEntry.findById(entryId).select("kitchenId").lean();
+  if (!entry) {
+    throw createError("Schedule entry not found", 404);
+  }
+  if (!entry.kitchenId) {
+    throw createError("Only kitchen meals can collect RSVPs", 400);
+  }
+
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user) {
+    throw createError("User not found", 404);
+  }
+  if (!user.kitchenId || !user.kitchenId.equals(entry.kitchenId)) {
+    throw createError("You are not a member of this kitchen", 403);
+  }
+
+  const uid = new Types.ObjectId(userId);
+  // Replace this member's RSVP: drop the existing one, then add the new choice
+  // (skip the add when clearing). Two scoped updates keep each member single.
+  await ScheduleEntry.updateOne(
+    { _id: entry._id },
+    { $pull: { rsvps: { userId: uid } } }
+  );
+  if (status) {
+    await ScheduleEntry.updateOne(
+      { _id: entry._id },
+      { $push: { rsvps: { userId: uid, status } } }
+    );
+  }
+
+  const updated = await ScheduleEntry.findById(entryId).lean<IScheduleEntry>();
+  if (!updated) {
+    throw createError("Schedule entry not found", 404);
+  }
+  return updated;
 }

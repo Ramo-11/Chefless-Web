@@ -33,6 +33,7 @@ import {
   updateMealSlotOrder,
   syncMealSlotOrderWithCustomSlots,
   setHiddenDefaultSlots,
+  notifyFoodReady,
   DEFAULT_MEAL_SLOTS,
   INVITE_CODE_REGEX,
 } from "../services/kitchen-service";
@@ -332,6 +333,26 @@ router.post(
     await leaveKitchen(currentUser._id.toString());
 
     res.status(200).json({ success: true });
+  })
+);
+
+// POST /api/kitchens/me/notify-food-ready — Lead announces food is ready to members
+router.post(
+  "/me/notify-food-ready",
+  requireAuth,
+  strictLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const result = await notifyFoodReady(currentUser._id.toString());
+
+    res.status(200).json(result);
   })
 );
 

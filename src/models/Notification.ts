@@ -21,6 +21,7 @@ export const NOTIFICATION_TYPES = [
   "recipe_cooked", // Someone posted an "I Cooked It" photo of your recipe
   "cooked_post_removed", // Recipe owner removed your "I Cooked It" photo
   "passport_stamp", // You unlocked a new country/region stamp
+  "kitchen_food_ready", // The kitchen lead announced that food is ready
   "system",
 ] as const;
 

@@ -21,6 +21,7 @@ import {
   notifyKitchenInviteReceived,
   notifyKitchenInviteAccepted,
   notifyKitchenInviteDeclined,
+  notifyKitchenFoodReady,
 } from "./notification-service";
 
 // ── Lead-transfer warnings ─────────────────────────────────────────────
@@ -45,6 +46,12 @@ export class TransferLeadWarningError extends Error {
 }
 
 const FREE_TIER_MAX_MEMBERS = 2;
+
+/**
+ * Cooldown between "food is ready" announcements so the lead can't spam the
+ * alert at members. A second tap inside this window is rejected with 429.
+ */
+const FOOD_READY_COOLDOWN_MS = 10 * 60 * 1000;
 
 /** Regex for validating invite codes. Shared with route validation. */
 export const INVITE_CODE_REGEX = /^CHEF-[A-Z0-9]{6}$/;
@@ -232,6 +239,53 @@ export async function updateKitchen(
   }
 
   return updated;
+}
+
+/**
+ * The kitchen lead announces that food is ready, notifying every other member.
+ * Lead-only. Enforces a cooldown so the alert cannot be spammed. Returns the
+ * number of members notified so the caller can confirm it back to the lead.
+ */
+export async function notifyFoodReady(
+  userId: string
+): Promise<{ notified: number }> {
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user || !user.kitchenId) {
+    throw createError("You are not in a kitchen", 400);
+  }
+
+  const kitchen = await Kitchen.findById(user.kitchenId);
+  if (!kitchen) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  if (!kitchen.leadId.equals(userId)) {
+    throw createError(
+      "Only the kitchen lead can announce that food is ready",
+      403
+    );
+  }
+
+  if (
+    kitchen.foodReadyNotifiedAt &&
+    Date.now() - kitchen.foodReadyNotifiedAt.getTime() < FOOD_READY_COOLDOWN_MS
+  ) {
+    throw createError(
+      "You just let everyone know. Give it a few minutes before announcing again.",
+      409
+    );
+  }
+
+  // Stamp the cooldown before fanning out so a double-tap can't double-send.
+  kitchen.foodReadyNotifiedAt = new Date();
+  await kitchen.save();
+
+  const notified = await notifyKitchenFoodReady(
+    userId,
+    kitchen._id.toString()
+  );
+
+  return { notified };
 }
 
 /** Default meal slots present in every kitchen — mirrors the Flutter client. */

@@ -58,6 +58,7 @@ const updateProfileSchema = z
     cuisinePreferences: z.array(z.string().max(50)).max(20).optional(),
     profilePicture: z.string().url().nullable().optional(),
     onboardingComplete: z.boolean().optional(),
+    language: z.enum(["en", "ar", "tr", "es"]).optional(),
   })
   .strict();
 

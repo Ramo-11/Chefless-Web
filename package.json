@@ -18,6 +18,7 @@
     "seed:gallery": "tsx src/scripts/seed/build-gallery.ts",
     "seed:recipes": "tsx src/scripts/seed/seed-real-recipes.ts",
     "seed:chefless": "tsx src/scripts/seed/seed-chefless-recipes.ts",
+    "seed:diets": "tsx src/scripts/seed/seed-diet-recipes.ts",
     "seed:clean-steps": "tsx src/scripts/seed/clean-chefless-steps.ts",
     "seed:remove-haram": "tsx src/scripts/seed/remove-haram-recipes.ts",
     "seed:dedupe-images": "tsx src/scripts/seed/dedupe-recipe-images.ts",

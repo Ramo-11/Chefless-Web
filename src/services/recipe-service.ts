@@ -27,8 +27,11 @@ import { getBlockedUserIds } from "./block-service";
  * saved/bookmarked. Remixes are tracked separately. Increasing this requires
  * a backfill so existing user counters stay consistent — see
  * scripts/backfill-recipe-counters.ts.
+ *
+ * Also gates the AI recipe-import path (see ai-recipe-service): a free user can
+ * keep importing until originals + saved reach this cap.
  */
-const FREE_TIER_RECIPE_LIMIT = 5;
+export const FREE_TIER_RECIPE_LIMIT = 5;
 /** Max remixes a free user can author. */
 const FREE_TIER_REMIX_LIMIT = 1;
 

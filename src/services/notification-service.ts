@@ -8,6 +8,7 @@ import Recipe from "../models/Recipe";
 import Kitchen from "../models/Kitchen";
 import ScheduleEntry from "../models/ScheduleEntry";
 import { sendPushNotification } from "../lib/fcm";
+import { buildPushContent, PushLang } from "../lib/push-content";
 
 // --- Types ---
 
@@ -24,8 +25,23 @@ interface CreateNotificationParams {
   kitchenName?: string;
   scheduleEntryId?: Types.ObjectId;
   inviteId?: Types.ObjectId;
+  /**
+   * English fallback push copy. The localized copy is built per-recipient in
+   * [createNotification] from the notification `type` + the fields above; these
+   * are only used if no template matches the type.
+   */
   pushTitle?: string;
   pushBody?: string;
+  /**
+   * Extra interpolation values the localized push templates need that aren't
+   * already top-level fields: schedule-import `count`, passport-stamp
+   * `regionName`, and the cooked-post-removal `ownerName`.
+   */
+  pushArgs?: {
+    count?: number;
+    regionName?: string;
+    ownerName?: string;
+  };
 }
 
 interface PaginatedNotifications {
@@ -75,6 +91,7 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
     case "kitchen_removed":
     case "kitchen_invite_accepted":
     case "kitchen_lead_transferred":
+    case "kitchen_food_ready":
       // Accepting lands the user in the kitchen screen; the sender tapping
       // the "accepted" receipt also wants the kitchen view.
       return "/kitchen";
@@ -99,9 +116,9 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
 export async function createNotification(
   params: CreateNotificationParams
 ): Promise<INotification | null> {
-  // Single query to check preferences and get FCM token
+  // Single query to check preferences and get FCM token + saved language.
   const user = await User.findById(params.userId)
-    .select("notificationPreferences fcmToken")
+    .select("notificationPreferences fcmToken language")
     .lean();
 
   // Check user's notification preferences before creating
@@ -125,8 +142,34 @@ export async function createNotification(
     inviteId: params.inviteId,
   });
 
+  // Resolve the push copy in the recipient's saved language, falling back to
+  // the English `pushTitle`/`pushBody` the caller provided for any type without
+  // a template. Done per-recipient (some notifications fan out to several users
+  // who may each have a different language).
+  const lang: PushLang =
+    user?.language === "ar" ||
+    user?.language === "tr" ||
+    user?.language === "es"
+      ? user.language
+      : "en";
+  const localized = buildPushContent(
+    {
+      type: params.type,
+      actorName: params.actorName,
+      recipeTitle: params.recipeTitle,
+      kitchenName: params.kitchenName,
+      shareMessage: params.shareMessage,
+      count: params.pushArgs?.count,
+      regionName: params.pushArgs?.regionName,
+      ownerName: params.pushArgs?.ownerName,
+    },
+    lang
+  );
+  const pushTitle = localized?.title ?? params.pushTitle;
+  const pushBody = localized?.body ?? params.pushBody;
+
   // Send push notification if user has an FCM token
-  if (params.pushTitle && params.pushBody && user?.fcmToken) {
+  if (pushTitle && pushBody && user?.fcmToken) {
     const pushData: Record<string, string> = {
       notificationId: notification._id.toString(),
       type: params.type,
@@ -165,8 +208,8 @@ export async function createNotification(
 
     sendPushNotification(
       user.fcmToken,
-      params.pushTitle,
-      params.pushBody,
+      pushTitle,
+      pushBody,
       pushData,
       unreadCount
     ).catch((err: unknown) => {
@@ -513,6 +556,7 @@ export async function notifyScheduleImportSuggestions(
       actorPhoto: actor.profilePicture,
       kitchenId: new Types.ObjectId(kitchenId),
       kitchenName: kitchen.name,
+      pushArgs: { count },
       pushTitle: "New Meal Suggestions",
       pushBody:
         `${actor.fullName} imported ${count} ${mealWord} as suggestions in ${kitchen.name}.`,
@@ -611,6 +655,48 @@ export async function notifyKitchenJoined(
     pushTitle: "New Kitchen Member",
     pushBody: `${actor.fullName} joined ${kitchen.name}.`,
   });
+}
+
+/**
+ * Announce "food is ready" to every kitchen member except the lead who fired
+ * it. Fans out one notification per member; each respects the recipient's
+ * `kitchen_food_ready` preference (a disabled member silently gets nothing).
+ * Returns the number of members actually notified.
+ */
+export async function notifyKitchenFoodReady(
+  leadId: string,
+  kitchenId: string
+): Promise<number> {
+  const [actor, kitchen, members] = await Promise.all([
+    getActorData(leadId),
+    Kitchen.findById(kitchenId).select("name").lean(),
+    User.find({ kitchenId: new Types.ObjectId(kitchenId) })
+      .select("_id")
+      .lean<{ _id: Types.ObjectId }[]>(),
+  ]);
+  if (!actor || !kitchen) return 0;
+
+  const recipientIds = members
+    .map((m) => m._id.toString())
+    .filter((id) => id !== leadId);
+
+  const results = await Promise.all(
+    recipientIds.map((memberId) =>
+      createNotification({
+        userId: new Types.ObjectId(memberId),
+        type: "kitchen_food_ready",
+        actorId: actor._id,
+        actorName: actor.fullName,
+        actorPhoto: actor.profilePicture,
+        kitchenId: new Types.ObjectId(kitchenId),
+        kitchenName: kitchen.name,
+        pushTitle: "Food is ready",
+        pushBody: `${actor.fullName} says food is ready in ${kitchen.name}.`,
+      })
+    )
+  );
+
+  return results.filter((n) => n !== null).length;
 }
 
 /** Welcome receipt for the member who joined (uses `kitchen_invite` preference). */
@@ -813,6 +899,7 @@ export async function notifyPassportStamp(params: {
     userId: new Types.ObjectId(params.userId),
     type: "passport_stamp",
     shareMessage: params.cuisine,
+    pushArgs: { regionName: params.regionName ?? undefined },
     pushTitle: "New passport stamp",
     pushBody: `Unlocked ${params.cuisine}${suffix}. Tap to see your passport.`,
   });
@@ -856,6 +943,7 @@ export async function notifyCookedPostRemoved(params: {
     recipeId: params.recipeId ? new Types.ObjectId(params.recipeId) : undefined,
     recipeTitle: params.recipeTitle,
     shareMessage: params.reason,
+    pushArgs: { ownerName: params.ownerName },
     pushTitle: "Your cooked-it photo was removed",
     pushBody: body,
   });
