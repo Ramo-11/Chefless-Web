@@ -6,6 +6,7 @@ import {
   listPendingCookPrompts,
   skipCookPrompt,
 } from "../services/rating-service";
+import { offsetFromQuery } from "../lib/timezone";
 
 const router = Router();
 
@@ -29,7 +30,8 @@ router.get(
       return;
     }
 
-    const prompts = await listPendingCookPrompts(user._id.toString());
+    const tz = offsetFromQuery(req.query.timezoneOffsetMinutes);
+    const prompts = await listPendingCookPrompts(user._id.toString(), tz);
     res.status(200).json({ prompts });
   })
 );

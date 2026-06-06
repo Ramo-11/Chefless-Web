@@ -31,6 +31,7 @@ import {
   uploadKitchenPhoto,
   deleteKitchenPhoto,
   updateMealSlotOrder,
+  updateMealSlotTimes,
   syncMealSlotOrderWithCustomSlots,
   setHiddenDefaultSlots,
   notifyFoodReady,
@@ -79,6 +80,7 @@ const updateKitchenSchema = z.object({
   isPublic: z.boolean().optional(),
   scheduleAddPolicy: z.enum(["lead_only", "all"]).optional(),
   slotOrderEditPolicy: z.enum(["lead_only", "editors", "all"]).optional(),
+  slotTimeEditPolicy: z.enum(["lead_only", "editors", "all"]).optional(),
   ratingsVisibility: z.enum(["public", "kitchen_only", "off"]).optional(),
   showMembersPublicly: z.boolean().optional(),
   allowMemberSuggestions: z.boolean().optional(),
@@ -92,6 +94,26 @@ const mealSlotOrderSchema = z.object({
     .array(z.string().min(1).max(40).trim())
     .min(1)
     .max(30),
+});
+
+const mealSlotTimesSchema = z.object({
+  // Partial update: a map of slot name -> 24h "HH:mm". 1..30 keys (4 defaults +
+  // 20 customs + cushion). Key validity (must be an active slot) is enforced
+  // in the service so we can return a precise 400.
+  mealSlotTimes: z
+    .record(
+      z.string().min(1).max(50),
+      z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, {
+        message: "Time must be 24h HH:mm",
+      })
+    )
+    .refine(
+      (o) => {
+        const n = Object.keys(o).length;
+        return n >= 1 && n <= 30;
+      },
+      { message: "Provide between 1 and 30 slot times" }
+    ),
 });
 
 // Validate the kitchen photo as a real base64 image data URI with a decoded
@@ -220,6 +242,30 @@ router.patch(
     const kitchen = await updateMealSlotOrder(
       currentUser._id.toString(),
       mealSlotOrder
+    );
+
+    res.status(200).json({ kitchen });
+  })
+);
+
+// PATCH /api/kitchens/me/slot-times — Set per-slot meal times (policy-gated)
+router.patch(
+  "/me/slot-times",
+  requireAuth,
+  validate({ body: mealSlotTimesSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const firebaseUid = req.user!.uid;
+    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+
+    if (!currentUser) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const { mealSlotTimes } = req.body as z.infer<typeof mealSlotTimesSchema>;
+    const kitchen = await updateMealSlotTimes(
+      currentUser._id.toString(),
+      mealSlotTimes
     );
 
     res.status(200).json({ kitchen });

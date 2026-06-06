@@ -46,6 +46,27 @@ export interface IKitchen extends Document {
    */
   slotOrderEditPolicy: "lead_only" | "editors" | "all";
   /**
+   * Per-slot time-of-day (24h `"HH:mm"`) used to gate the "Did you cook it?"
+   * prompt: a scheduled meal only surfaces once its slot time has passed in the
+   * viewing member's local timezone. Keys are lowercased/trimmed slot names
+   * (defaults + customs); values are `"HH:mm"`.
+   *
+   * Undefined for kitchens that pre-date this feature (and for any slot the
+   * lead hasn't customised) — resolution falls back to canonical defaults
+   * (breakfast 08:00, lunch 12:00, dinner 18:00, snack 15:00) then a 12:00
+   * noon fallback for custom/unknown slots. Because gating reads this map live
+   * at query time, changing a slot time instantly re-gates every existing and
+   * future entry — nothing is denormalised onto schedule entries.
+   */
+  mealSlotTimes?: Map<string, string>;
+  /**
+   * Controls who can edit `mealSlotTimes`. Mirrors `slotOrderEditPolicy`.
+   * - `"lead_only"` (default): only the kitchen lead.
+   * - `"editors"`: lead + members in `membersWithScheduleEdit`.
+   * - `"all"`: any kitchen member.
+   */
+  slotTimeEditPolicy: "lead_only" | "editors" | "all";
+  /**
    * Controls who can add schedule entries directly.
    * - `"lead_only"`: only the lead and members in `membersWithScheduleEdit` add directly;
    *   everyone else's additions become suggestions awaiting approval.
@@ -170,6 +191,31 @@ const kitchenSchema = new Schema<IKitchen>(
       },
     },
     slotOrderEditPolicy: {
+      type: String,
+      enum: ["lead_only", "editors", "all"],
+      default: "lead_only",
+    },
+    mealSlotTimes: {
+      type: Map,
+      of: String,
+      default: undefined,
+      validate: {
+        // Bound the map size (4 defaults + 20 max customs + cushion) and
+        // enforce strict 24h "HH:mm" on every value so a malformed write can't
+        // poison the gating math.
+        validator: (v: Map<string, string> | undefined) => {
+          if (!v) return true;
+          if (v.size > 30) return false;
+          for (const time of v.values()) {
+            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return false;
+          }
+          return true;
+        },
+        message:
+          "mealSlotTimes values must be 24h HH:mm and at most 30 entries",
+      },
+    },
+    slotTimeEditPolicy: {
       type: String,
       enum: ["lead_only", "editors", "all"],
       default: "lead_only",

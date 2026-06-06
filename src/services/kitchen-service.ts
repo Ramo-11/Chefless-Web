@@ -184,6 +184,7 @@ export async function updateKitchen(
     isPublic?: boolean;
     scheduleAddPolicy?: "lead_only" | "all";
     slotOrderEditPolicy?: "lead_only" | "editors" | "all";
+    slotTimeEditPolicy?: "lead_only" | "editors" | "all";
     ratingsVisibility?: "public" | "kitchen_only" | "off";
     showMembersPublicly?: boolean;
     allowMemberSuggestions?: boolean;
@@ -213,6 +214,9 @@ export async function updateKitchen(
   }
   if (updates.slotOrderEditPolicy !== undefined) {
     updateFields.slotOrderEditPolicy = updates.slotOrderEditPolicy;
+  }
+  if (updates.slotTimeEditPolicy !== undefined) {
+    updateFields.slotTimeEditPolicy = updates.slotTimeEditPolicy;
   }
   if (updates.ratingsVisibility !== undefined) {
     updateFields.ratingsVisibility = updates.ratingsVisibility;
@@ -306,6 +310,65 @@ export function activeDefaultSlots(
   return DEFAULT_MEAL_SLOTS.filter((d) => !hidden.has(d));
 }
 
+/**
+ * Canonical default time-of-day for each built-in slot. Mirrors the Flutter
+ * client (`meal_slots.dart`) — keep both in lockstep.
+ */
+export const DEFAULT_MEAL_SLOT_TIMES: Readonly<Record<string, string>> = {
+  breakfast: "08:00",
+  lunch: "12:00",
+  dinner: "18:00",
+  snack: "15:00",
+};
+
+/**
+ * Fallback time for custom / unknown / unset slots — noon, the most neutral
+ * "the day is underway" anchor so a custom slot neither fires at 3 AM nor stays
+ * suppressed until late evening.
+ */
+export const FALLBACK_SLOT_TIME = "12:00";
+
+/**
+ * The Mongoose `Map` for `mealSlotTimes` surfaces as a real `Map` on hydrated
+ * docs and (depending on the read path) either a `Map` or a plain object under
+ * `.lean()`. Reads a slot's stored time from whichever shape, keyed
+ * case-insensitively.
+ */
+function readStoredSlotTime(
+  times: Map<string, string> | Record<string, string> | null | undefined,
+  key: string
+): string | undefined {
+  if (!times) return undefined;
+  if (times instanceof Map) {
+    return times.get(key) ?? times.get(key.toLowerCase());
+  }
+  // Plain object (lean reads / JSON). Keys are stored lowercased on write, but
+  // match case-insensitively to be safe against grandfathered data.
+  const direct = times[key];
+  if (direct !== undefined) return direct;
+  const lower = key.toLowerCase();
+  for (const [k, v] of Object.entries(times)) {
+    if (k.toLowerCase() === lower) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Resolves the effective `"HH:mm"` for a slot: explicit kitchen override ->
+ * canonical default -> 12:00 fallback. Single source of truth shared by the
+ * cook-prompt gating. `slotName` is matched case-insensitively (schedule
+ * entries trim their slot; defaults are lowercase; customs preserve casing).
+ */
+export function resolveSlotTime(
+  kitchen: Pick<IKitchen, "mealSlotTimes"> | null | undefined,
+  slotName: string
+): string {
+  const key = slotName.trim().toLowerCase();
+  const override = readStoredSlotTime(kitchen?.mealSlotTimes, key);
+  if (override && /^([01]\d|2[0-3]):[0-5]\d$/.test(override)) return override;
+  return DEFAULT_MEAL_SLOT_TIMES[key] ?? FALLBACK_SLOT_TIME;
+}
+
 function hasSlotOrderEditPermission(
   userId: string,
   kitchen: Pick<
@@ -372,6 +435,78 @@ export async function updateMealSlotOrder(
   // Persist in the exact casing the caller sent, so custom slots like
   // "Pre-Workout" keep their chosen display form.
   kitchen.mealSlotOrder = submittedOrder.map((s) => s.trim());
+  await kitchen.save();
+
+  return kitchen;
+}
+
+function hasSlotTimeEditPermission(
+  userId: string,
+  kitchen: Pick<
+    IKitchen,
+    "leadId" | "membersWithScheduleEdit" | "slotTimeEditPolicy"
+  >
+): boolean {
+  if (kitchen.leadId.equals(userId)) return true;
+  switch (kitchen.slotTimeEditPolicy) {
+    case "all":
+      return true;
+    case "editors":
+      return kitchen.membersWithScheduleEdit.some((id) => id.equals(userId));
+    case "lead_only":
+    default:
+      return false;
+  }
+}
+
+/**
+ * Sets the time-of-day for one or more meal slots. Partial-update semantics:
+ * only the provided keys are written; unspecified slots keep their current
+ * value (a single row edit sends one key). Keys must be slots currently in use
+ * (active defaults + customs) so the map can't accumulate orphan entries; an
+ * unknown key is a 400. Gated by `slotTimeEditPolicy`.
+ */
+export async function updateMealSlotTimes(
+  userId: string,
+  times: Record<string, string>
+): Promise<IKitchen> {
+  const user = await User.findById(userId).select("kitchenId").lean();
+  if (!user || !user.kitchenId) {
+    throw createError("You are not in a kitchen", 400);
+  }
+
+  const kitchen = await Kitchen.findById(user.kitchenId);
+  if (!kitchen) {
+    throw createError("Kitchen not found", 404);
+  }
+
+  if (!hasSlotTimeEditPermission(userId, kitchen)) {
+    throw createError(
+      "You don't have permission to set this kitchen's meal slot times",
+      403
+    );
+  }
+
+  const validKeys = new Set(
+    [...activeDefaultSlots(kitchen), ...kitchen.customMealSlots].map((s) =>
+      s.trim().toLowerCase()
+    )
+  );
+
+  // Start from the existing map so unspecified slots survive the merge.
+  const merged = new Map<string, string>(kitchen.mealSlotTimes ?? []);
+  for (const [rawKey, rawTime] of Object.entries(times)) {
+    const key = rawKey.trim().toLowerCase();
+    if (!validKeys.has(key)) {
+      throw createError(`"${rawKey}" is not a slot in this kitchen`, 400);
+    }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(rawTime)) {
+      throw createError(`"${rawTime}" is not a valid 24h HH:mm time`, 400);
+    }
+    merged.set(key, rawTime);
+  }
+
+  kitchen.mealSlotTimes = merged;
   await kitchen.save();
 
   return kitchen;

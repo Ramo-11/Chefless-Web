@@ -5,6 +5,30 @@ import Kitchen from "../models/Kitchen";
 import ScheduleEntry from "../models/ScheduleEntry";
 import User, { IUser } from "../models/User";
 import { canViewRecipe } from "./visibility-service";
+import { resolveSlotTime } from "./kitchen-service";
+import { normalizeOffset } from "../lib/timezone";
+
+/**
+ * UTC instant (ms) at which a scheduled meal's cook prompt becomes due.
+ * `entryDateMs` is the entry's `date` — UTC midnight of the local calendar day
+ * the user picked. Adding the slot's minute-of-day and subtracting the user's
+ * offset (minutes east of UTC) yields the wall-clock slot time, in that user's
+ * zone, as a UTC instant. Pure + exported so the gating math is unit-testable.
+ *
+ * Example: New York (`offset = -240`), dinner `18:00`, entry dated today ->
+ * fires at 22:00 UTC (18:00 local). Tokyo (`offset = 540`), breakfast `08:00`
+ * -> fires before UTC midnight of the entry's date, which is why the candidate
+ * window must look ahead of `now`.
+ */
+export function cookPromptFireTimeMs(
+  entryDateMs: number,
+  hhmm: string,
+  offsetMinutes: number
+): number {
+  const [h, m] = hhmm.split(":").map((n) => Number.parseInt(n, 10));
+  const minuteOfDay = (h || 0) * 60 + (m || 0);
+  return entryDateMs + minuteOfDay * 60_000 - offsetMinutes * 60_000;
+}
 
 interface AppError extends Error {
   statusCode: number;
@@ -260,30 +284,62 @@ export async function getRatingAggregateForViewer(
  */
 export async function listPendingCookPrompts(
   userId: string,
+  requestOffsetMinutes?: number,
   limit = 10
 ): Promise<unknown[]> {
   const userOid = new Types.ObjectId(userId);
-  const now = new Date();
-  // 7 days is our "nag cutoff" — older uncooked entries quietly expire so the
-  // user doesn't return from a vacation to a 30-item prompt queue.
-  const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const nowMs = Date.now();
 
-  const user = await User.findById(userOid).select("kitchenId").lean();
+  const user = await User.findById(userOid)
+    .select("kitchenId timezoneOffsetMinutes")
+    .lean();
 
-  // Respect the kitchen's "off" toggle — don't surface prompts from a kitchen
-  // that has disabled rating flows.
+  // Timezone offset (minutes east of UTC). The live device offset wins (it is
+  // DST-correct for "now"); fall back to the last-known stored offset, then UTC.
+  const normalizedOverride = normalizeOffset(requestOffsetMinutes);
+  const offset =
+    normalizedOverride ?? user?.timezoneOffsetMinutes ?? 0;
+
+  // Opportunistically keep the user's last-known zone fresh (fire-and-forget,
+  // mirrors recordAiUsage). Only when a fresh override differs from stored.
+  if (
+    normalizedOverride !== undefined &&
+    normalizedOverride !== user?.timezoneOffsetMinutes
+  ) {
+    User.updateOne(
+      { _id: userOid },
+      { $set: { timezoneOffsetMinutes: normalizedOverride } }
+    ).catch(() => {
+      /* non-critical — the gate already used the live offset */
+    });
+  }
+
+  // Respect the kitchen's "off" toggle and load its per-slot times for gating.
+  let kitchen: { mealSlotTimes?: Map<string, string> } | null = null;
   if (user?.kitchenId) {
-    const kitchen = await Kitchen.findById(user.kitchenId)
-      .select("ratingsVisibility")
+    const k = await Kitchen.findById(user.kitchenId)
+      .select("ratingsVisibility mealSlotTimes")
       .lean();
-    if (kitchen?.ratingsVisibility === "off") return [];
+    if (k?.ratingsVisibility === "off") return [];
+    kitchen = k as { mealSlotTimes?: Map<string, string> } | null;
   }
 
   const scopeFilter = user?.kitchenId
     ? { kitchenId: user.kitchenId }
     : { userId: userOid, kitchenId: { $exists: false } };
 
-  const entries = await ScheduleEntry.find({
+  // Coarse window — a deliberate SUPERSET; the precise per-entry fire-time
+  // filter below is the source of truth. 7-day nag cutoff + 1 day slack on the
+  // low end; +36h on the high end so "today" survives for users far east of
+  // UTC whose early-slot meals fire before the entry's UTC-midnight date.
+  const cutoffLower = new Date(nowMs - 8 * 24 * 60 * 60 * 1000);
+  const cutoffUpper = new Date(nowMs + 36 * 60 * 60 * 1000);
+
+  // Fetch a generous cap BEFORE filtering — the fire-time filter discards
+  // not-yet-due entries, and we must not let a page of future dinners starve
+  // earlier breakfasts. Slice to `limit` after the precise pass.
+  const GENEROUS_CAP = 60;
+  const candidates = await ScheduleEntry.find({
     ...scopeFilter,
     status: "confirmed",
     cookedAt: null,
@@ -294,13 +350,23 @@ export async function listPendingCookPrompts(
       { ratingPromptSkippedAt: { $exists: false } },
     ],
     recipeId: { $ne: null },
-    date: { $gte: cutoff, $lt: now },
+    date: { $gte: cutoffLower, $lt: cutoffUpper },
   })
     .sort({ date: -1 })
-    .limit(limit)
+    .limit(GENEROUS_CAP)
     .lean();
 
-  return entries;
+  const result: unknown[] = [];
+  for (const entry of candidates) {
+    const hhmm = resolveSlotTime(kitchen, entry.mealSlot);
+    const fireMs = cookPromptFireTimeMs(entry.date.getTime(), hhmm, offset);
+    if (fireMs <= nowMs) {
+      result.push(entry);
+      if (result.length === limit) break;
+    }
+  }
+
+  return result;
 }
 
 /**

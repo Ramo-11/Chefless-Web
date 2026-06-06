@@ -3,6 +3,7 @@ import { z } from "zod";
 import User from "../models/User";
 import { env } from "../lib/env";
 import { hasActivePremium } from "../lib/premium";
+import { normalizeOffset } from "../lib/timezone";
 import { FREE_TIER_RECIPE_LIMIT } from "./recipe-service";
 import type { ImportedRecipe, ImportedIngredient, ImportedStep } from "./recipe-import-service";
 
@@ -74,16 +75,6 @@ function localDayKey(offsetMinutes?: number | null): string {
   }
   const localMs = Date.now() + offsetMinutes * 60_000;
   return new Date(localMs).toISOString().slice(0, 10);
-}
-
-function normalizeOffset(
-  raw: number | null | undefined
-): number | undefined {
-  if (raw == null || !Number.isFinite(raw)) return undefined;
-  // Sanity-clip to `-14*60..14*60` (no inhabited zone is outside Etc/GMT±14).
-  const clipped = Math.round(raw);
-  if (clipped < -840 || clipped > 840) return undefined;
-  return clipped;
 }
 
 export async function getAiUsage(
