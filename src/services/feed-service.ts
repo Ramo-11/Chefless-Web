@@ -336,9 +336,10 @@ export async function forYouFeed(
     followedByFollowingIds = secondDegree.map((f) => f.followingId);
   }
 
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const skip = (page - 1) * limit;
 
+  // No hard recency cutoff: the whole visible catalog is eligible. Recency
+  // still shapes ranking via `_recencyScore` below, but never hides a recipe.
   const baseMatch: Record<string, unknown> = {
     isPrivate: false,
     isHidden: { $ne: true },
@@ -346,7 +347,6 @@ export async function forYouFeed(
       blockExclusionIds.length > 0
         ? { $ne: userId, $nin: blockExclusionIds }
         : { $ne: userId },
-    createdAt: { $gte: thirtyDaysAgo },
   };
 
   // First pass: get maxEngagement for normalization
@@ -571,9 +571,10 @@ export async function trendingFeed(
 ): Promise<PaginatedFeed> {
   const blockExclusionIds = await getBlockExclusionIds(userId);
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const skip = (page - 1) * limit;
 
+  // Rank by engagement across the whole visible catalog rather than a fixed
+  // recent window, so the feed is never emptied out as recipes age.
   const baseMatch: Record<string, unknown> = {
     isPrivate: false,
     isHidden: { $ne: true },
@@ -581,7 +582,6 @@ export async function trendingFeed(
       blockExclusionIds.length > 0
         ? { $ne: userId, $nin: blockExclusionIds }
         : { $ne: userId },
-    createdAt: { $gte: sevenDaysAgo },
   };
 
   const [[result], featured] = await Promise.all([
@@ -732,11 +732,9 @@ export async function seasonalFeed(
   if (activeTags.length > 0) {
     const slugs = activeTags.map((t) => t.slug);
     baseMatch.labels = { $in: slugs };
-  } else {
-    // Fallback: recent 14 days
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-    baseMatch.createdAt = { $gte: fourteenDaysAgo };
   }
+  // No active seasonal tags: fall back to the full visible catalog rather than
+  // an empty feed. The sort below still ranks user recipes ahead of seed.
 
   const [[result], featured] = await Promise.all([
     Recipe.aggregate([
