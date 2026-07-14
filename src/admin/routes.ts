@@ -6,6 +6,7 @@ import { csrfProtection } from "../middleware/csrf";
 import { loginPage, loginPost, logout } from "./auth";
 import { dashboardPage } from "./controllers/dashboard";
 import { analyticsPage } from "./controllers/analytics";
+import { revenuePage } from "./controllers/revenue";
 import {
   usersPage,
   userDetail,
@@ -220,6 +221,7 @@ router.post("/api/early-access/send", csrfProtection, sendCampaignToList);
 router.use(expressLayouts);
 router.get("/", dashboardPage);
 router.get("/analytics", analyticsPage);
+router.get("/revenue", revenuePage);
 router.get("/users", usersPage);
 router.get("/recipes", recipesPage);
 router.get("/moderated-posts", moderatedPostsPage);

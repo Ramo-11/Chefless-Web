@@ -51,6 +51,30 @@
     </div>
   </div>
 
+  <% if (revenue) { %>
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-green">
+      <i class="fas fa-dollar-sign"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= revenue.netRevenue.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %></span>
+      <span class="stat-label">Net Revenue</span>
+    </div>
+    <a href="/admin/revenue" class="stat-action stat-action-revenue">View revenue <i class="fas fa-arrow-right"></i></a>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon stat-icon-purple">
+      <i class="fas fa-arrows-rotate"></i>
+    </div>
+    <div class="stat-content">
+      <span class="stat-value"><%= revenue.mrr.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %></span>
+      <span class="stat-label">MRR</span>
+    </div>
+    <div class="stat-trend"><i class="fas fa-users"></i> <%= revenue.payingSubscribers.toLocaleString() %> paying</div>
+  </div>
+  <% } %>
+
   <div class="stat-card <%= stats.pendingReports > 0 ? 'stat-card-alert' : '' %>">
     <div class="stat-icon stat-icon-red">
       <i class="fas fa-flag"></i>
@@ -142,4 +166,11 @@
     </table>
   </div>
 </div>
+
+<style>
+/* The Net Revenue tile links to the revenue page; the shared .stat-action
+   colour signals alerts (red), so recolour this variant to the brand hue. */
+.stat-action-revenue { color: var(--primary); }
+.stat-action-revenue:hover { text-decoration: underline; }
+</style>
 

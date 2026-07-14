@@ -4,6 +4,7 @@ import Recipe from "../../models/Recipe";
 import Kitchen from "../../models/Kitchen";
 import Report from "../../models/Report";
 import ClientError from "../../models/ClientError";
+import { getRevenueAnalytics } from "../../services/revenue-service";
 import { logger } from "../../lib/logger";
 
 export async function dashboardPage(
@@ -49,8 +50,28 @@ export async function dashboardPage(
       ClientError.countDocuments({ lastSeenAt: { $gte: weekAgo } }),
     ]);
 
+    // Revenue summary is best-effort: a failure here must never take the
+    // whole dashboard down, so it is fetched separately and hidden on error.
+    let revenue: {
+      netRevenue: number;
+      mrr: number;
+      payingSubscribers: number;
+    } | null = null;
+    try {
+      const revenueAnalytics = await getRevenueAnalytics();
+      revenue = {
+        netRevenue: revenueAnalytics.totals.netRevenue,
+        mrr: revenueAnalytics.recurring.mrr,
+        payingSubscribers: revenueAnalytics.recurring.payingSubscribers,
+      };
+    } catch (error) {
+      logger.error({ err: error }, "Failed to load revenue summary for dashboard");
+      revenue = null;
+    }
+
     res.render("dashboard", {
       page: "dashboard",
+      revenue,
       stats: {
         totalUsers,
         newUsersWeek,

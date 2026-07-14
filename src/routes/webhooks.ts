@@ -3,6 +3,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import User from "../models/User";
 import WebhookEvent from "../models/WebhookEvent";
+import Transaction, { buildTransactionInput } from "../models/Transaction";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
@@ -32,6 +33,24 @@ const revenueCatEventSchema = z
     app_user_id: z.string().min(1).optional(),
     product_id: z.string().optional(),
     expiration_at_ms: z.number().optional(),
+    // Financial fields recorded to the Transaction ledger. All optional and
+    // nullable because RevenueCat sends `null` for unknown values (and omits
+    // them on non-money events), and rejecting those would make RevenueCat
+    // retry the webhook forever. `.passthrough()` already carries them; these
+    // just document and type-check what the ledger consumes.
+    price: z.number().nullish(),
+    price_in_purchased_currency: z.number().nullish(),
+    currency: z.string().nullish(),
+    takehome_percentage: z.number().nullish(),
+    commission_percentage: z.number().nullish(),
+    tax_percentage: z.number().nullish(),
+    store: z.string().nullish(),
+    environment: z.string().nullish(),
+    purchased_at_ms: z.number().nullish(),
+    event_timestamp_ms: z.number().nullish(),
+    period_type: z.string().nullish(),
+    renewal_number: z.number().nullish(),
+    cancel_reason: z.string().nullish(),
   })
   .passthrough();
 
@@ -61,6 +80,28 @@ function isDuplicateKeyError(err: unknown): boolean {
     "code" in err &&
     (err as { code?: number }).code === 11000
   );
+}
+
+/**
+ * Records a financial ledger row for a money-moving event.
+ *
+ * This is analytics bookkeeping and must never interfere with entitlement
+ * processing, so it swallows every error and never throws. The insert is
+ * idempotent: a duplicate eventId (backfill already wrote it, or a rare
+ * post-dedupe race) is ignored.
+ */
+async function recordTransaction(
+  eventId: string,
+  event: unknown
+): Promise<void> {
+  const input = buildTransactionInput(eventId, event);
+  if (!input) return;
+  try {
+    await Transaction.create(input);
+  } catch (err) {
+    if (isDuplicateKeyError(err)) return;
+    logger.error({ err, eventId }, "Failed to record revenue transaction");
+  }
 }
 
 router.post("/revenuecat", async (req: Request, res: Response) => {
@@ -135,6 +176,10 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Internal server error" });
     return;
   }
+
+  // Record the financial ledger row now that this event is confirmed new.
+  // Never lets a bookkeeping failure block entitlement processing below.
+  await recordTransaction(idempotencyKey, event);
 
   try {
     switch (type) {
