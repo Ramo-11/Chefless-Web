@@ -309,6 +309,64 @@
   </div>
 </div>
 
+<!-- AI cost (Claude) -->
+<div class="card">
+  <div class="card-header">
+    <h2><i class="fas fa-robot"></i> AI Cost (Claude)</h2>
+  </div>
+  <div class="ai-cost-body">
+    <div class="ai-cost-tiles">
+      <div class="ai-cost-tile">
+        <span class="ai-cost-value"><%= fmtUsd(aiCost.costThisMonth) %></span>
+        <span class="ai-cost-label">This month</span>
+        <span class="ai-cost-sub"><%= fmtNum(aiCost.callsThisMonth) %> calls</span>
+      </div>
+      <div class="ai-cost-tile">
+        <span class="ai-cost-value"><%= fmtUsd(aiCost.costLastMonth) %></span>
+        <span class="ai-cost-label">Last month</span>
+      </div>
+      <div class="ai-cost-tile">
+        <span class="ai-cost-value"><%= fmtUsd(aiCost.costAllTime) %></span>
+        <span class="ai-cost-label">All time</span>
+        <span class="ai-cost-sub"><%= fmtNum(aiCost.callsAllTime) %> calls</span>
+      </div>
+      <div class="ai-cost-tile">
+        <span class="ai-cost-value"><%= fmtNum(aiCost.tokensAllTime.input + aiCost.tokensAllTime.output) %></span>
+        <span class="ai-cost-label">Tokens all time</span>
+        <span class="ai-cost-sub"><%= fmtNum(aiCost.tokensAllTime.input) %> in / <%= fmtNum(aiCost.tokensAllTime.output) %> out</span>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="num">Calls</th>
+            <th class="num">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% aiCost.byFeature.forEach(function (f) { %>
+          <tr>
+            <td><strong><%= prettify(f.feature) %></strong></td>
+            <td class="num text-muted"><%= fmtNum(f.calls) %></td>
+            <td class="num"><%= fmtUsd(f.costUsd) %></td>
+          </tr>
+          <% }); %>
+          <% if (aiCost.byFeature.length === 0) { %>
+          <tr><td colspan="3" class="empty-state">No AI calls recorded yet</td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+    <% if (aiCost.trackingSince) { %>
+    <p class="ai-cost-note">Token-level cost tracking started <%= fmtDate(aiCost.trackingSince) %>. Calls made before that date are not included here (see the AI usage card on Analytics for lifetime call counts).</p>
+    <% } else { %>
+    <p class="ai-cost-note">Cost tracking is live but no AI calls have been recorded yet. Lifetime call counts (without cost) are on the Analytics page.</p>
+    <% } %>
+  </div>
+</div>
+
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 
@@ -636,8 +694,51 @@
 
 .revenue-empty p:last-child { margin-bottom: 0; }
 
+/* ── AI cost card ──────────────────────────────────────────── */
+.ai-cost-body { padding: 1.25rem 1.5rem 1.5rem; }
+
+.ai-cost-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.ai-cost-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.ai-cost-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-cost-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.ai-cost-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.ai-cost-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.85rem;
+  line-height: 1.5;
+}
+
 /* ── Responsive ────────────────────────────────────────────── */
 @media (max-width: 960px) {
   .revenue-grid-2 { grid-template-columns: 1fr; }
+  .ai-cost-tiles { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

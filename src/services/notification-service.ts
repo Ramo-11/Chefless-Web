@@ -8,6 +8,7 @@ import Recipe from "../models/Recipe";
 import Kitchen from "../models/Kitchen";
 import ScheduleEntry from "../models/ScheduleEntry";
 import { sendPushNotification } from "../lib/fcm";
+import { logger } from "../lib/logger";
 import { buildPushContent, PushLang } from "../lib/push-content";
 
 // --- Types ---
@@ -213,8 +214,7 @@ export async function createNotification(
       pushData,
       unreadCount
     ).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      console.error(`Push notification failed: ${msg}`);
+      logger.error({ err }, "Push notification failed");
     });
   }
 

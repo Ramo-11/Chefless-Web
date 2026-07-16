@@ -371,6 +371,61 @@
       </table>
     </div>
   </div>
+
+  <!-- AI usage -->
+  <div class="card">
+    <div class="card-header">
+      <h2><i class="fas fa-robot"></i> AI Usage</h2>
+    </div>
+    <div class="ai-usage-summary">
+      <div class="ai-usage-stat">
+        <span class="ai-usage-value"><%= Number(aiUsage.totalCalls).toLocaleString('en-US') %></span>
+        <span class="ai-usage-label">Total AI calls</span>
+      </div>
+      <div class="ai-usage-stat">
+        <span class="ai-usage-value"><%= Number(aiUsage.generateCalls).toLocaleString('en-US') %></span>
+        <span class="ai-usage-label">Generate + import</span>
+      </div>
+      <div class="ai-usage-stat">
+        <span class="ai-usage-value"><%= Number(aiUsage.substitutionsCalls).toLocaleString('en-US') %></span>
+        <span class="ai-usage-label">Substitutions</span>
+      </div>
+      <div class="ai-usage-stat">
+        <span class="ai-usage-value"><%= Number(aiUsage.formatCalls).toLocaleString('en-US') %></span>
+        <span class="ai-usage-label">Format notes</span>
+      </div>
+      <div class="ai-usage-stat">
+        <span class="ai-usage-value"><%= Number(aiUsage.activeAiUsers30d).toLocaleString('en-US') %></span>
+        <span class="ai-usage-label">AI users, last 30 days</span>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>User</th>
+            <th>Email</th>
+            <th>AI Calls</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% aiUsage.topUsers.forEach(function(user, i) { %>
+          <tr>
+            <td class="text-muted"><%= i + 1 %></td>
+            <td><strong><%= user.name %></strong></td>
+            <td class="text-muted"><%= user.email %></td>
+            <td><%= Number(user.calls).toLocaleString('en-US') %></td>
+          </tr>
+          <% }); %>
+          <% if (aiUsage.topUsers.length === 0) { %>
+          <tr><td colspan="4" class="empty-state">No AI usage yet</td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+    <p class="ai-usage-note">Lifetime call counts from user counters. Dollar cost per call is tracked on the Revenue page.</p>
+  </div>
 </div>
 
 <!-- Chart.js CDN -->
@@ -753,12 +808,51 @@
   gap: 1.5rem;
 }
 
+/* ── AI usage card ───────────────────────────────────────── */
+.ai-usage-summary {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 0.25rem;
+}
+
+.ai-usage-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.ai-usage-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-usage-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.ai-usage-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding: 0.75rem 1.5rem 1.25rem;
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 
 @media (max-width: 960px) {
   .analytics-charts-grid,
   .analytics-tables-grid {
     grid-template-columns: 1fr;
+  }
+  .ai-usage-summary {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 

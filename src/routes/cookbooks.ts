@@ -3,7 +3,6 @@ import { z } from "zod";
 import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
   createCookbook,
   updateCookbook,
@@ -100,9 +99,8 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -110,7 +108,7 @@ router.get(
     const { page, limit } = req.query as unknown as z.infer<
       typeof paginationSchema
     >;
-    const result = await listMyCookbooks(user._id.toString(), page, limit);
+    const result = await listMyCookbooks(userId, page, limit);
     res.status(200).json(result);
   })
 );
@@ -121,15 +119,14 @@ router.post(
   requireAuth,
   validate({ body: createCookbookSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const data = req.body as z.infer<typeof createCookbookSchema>;
-    const cookbook = await createCookbook(user._id.toString(), data);
+    const cookbook = await createCookbook(userId, data);
     res.status(201).json({ cookbook });
   })
 );
@@ -140,9 +137,8 @@ router.get(
   requireAuth,
   validate({ query: containingRecipeQuery }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -151,7 +147,7 @@ router.get(
       typeof containingRecipeQuery
     >;
     const ids = await listCookbooksContainingRecipe(
-      user._id.toString(),
+      userId,
       recipeId
     );
     res.status(200).json({ cookbookIds: ids });
@@ -164,11 +160,8 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const viewerId = user ? user._id.toString() : null;
+    const viewerId = req.user?.userId ?? null;
     const cookbook = await getCookbook(id, viewerId);
     res.status(200).json({ cookbook });
   })
@@ -180,16 +173,15 @@ router.patch(
   requireAuth,
   validate({ params: objectIdParam, body: updateCookbookSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const updates = req.body as z.infer<typeof updateCookbookSchema>;
-    const cookbook = await updateCookbook(id, user._id.toString(), updates);
+    const cookbook = await updateCookbook(id, userId, updates);
     res.status(200).json({ cookbook });
   })
 );
@@ -200,15 +192,14 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await deleteCookbook(id, user._id.toString());
+    await deleteCookbook(id, userId);
     res.status(200).json({ success: true });
   })
 );
@@ -219,12 +210,9 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam, query: filterRecipesSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const filters = req.query as unknown as z.infer<typeof filterRecipesSchema>;
-    const viewerId = user ? user._id.toString() : null;
+    const viewerId = req.user?.userId ?? null;
 
     const result = await listCookbookRecipes(
       id,
@@ -249,9 +237,8 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam, body: addRecipesSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -260,7 +247,7 @@ router.post(
     const { recipeIds } = req.body as z.infer<typeof addRecipesSchema>;
     const cookbook = await addRecipesToCookbook(
       id,
-      user._id.toString(),
+      userId,
       recipeIds
     );
     res.status(200).json({ cookbook });
@@ -273,9 +260,8 @@ router.delete(
   requireAuth,
   validate({ params: recipeIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -283,7 +269,7 @@ router.delete(
     const { id, recipeId } = req.params as z.infer<typeof recipeIdParam>;
     const cookbook = await removeRecipeFromCookbook(
       id,
-      user._id.toString(),
+      userId,
       recipeId
     );
     res.status(200).json({ cookbook });

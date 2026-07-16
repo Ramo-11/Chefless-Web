@@ -231,19 +231,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam, body: rsvpSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const { status } = req.body as z.infer<typeof rsvpSchema>;
-    const entry = await setEntryRsvp(currentUser._id.toString(), id, status);
+    const entry = await setEntryRsvp(userId, id, status);
 
     res.status(200).json({ entry });
   })
@@ -373,11 +369,8 @@ router.patch(
   requireAuth,
   validate({ params: objectIdParam, body: markCookedSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -385,7 +378,7 @@ router.patch(
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const body = req.body as z.infer<typeof markCookedSchema>;
     const cookedAt = body.cookedAt ? new Date(body.cookedAt) : undefined;
-    await markEntryCooked(currentUser._id.toString(), id, cookedAt);
+    await markEntryCooked(userId, id, cookedAt);
 
     res.status(200).json({ success: true });
   })
@@ -397,17 +390,14 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await clearEntryCooked(currentUser._id.toString(), id);
+    await clearEntryCooked(userId, id);
 
     res.status(200).json({ success: true });
   })

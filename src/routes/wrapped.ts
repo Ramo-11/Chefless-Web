@@ -2,7 +2,6 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import { getWrappedSummary } from "../services/wrapped-service";
 import { getAppConfig, isWrappedAvailableFor } from "../lib/app-config";
 
@@ -33,19 +32,18 @@ router.get(
   requireAuth,
   validate({ query: yearSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const config = await getAppConfig();
-    if (!isWrappedAvailableFor(config, user._id)) {
+    if (!isWrappedAvailableFor(config, userId)) {
       res.status(403).json({ error: "Wrapped is not available right now." });
       return;
     }
     const { year } = req.query as unknown as z.infer<typeof yearSchema>;
-    const summary = await getWrappedSummary(user._id.toString(), year);
+    const summary = await getWrappedSummary(userId, year);
     res.status(200).json(summary);
   })
 );

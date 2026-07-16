@@ -44,13 +44,12 @@ router.get(
   "/me",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    const summary = await getPassportSummary(user._id.toString());
+    const summary = await getPassportSummary(userId);
     res.status(200).json(summary);
   })
 );
@@ -63,10 +62,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params as z.infer<typeof objectIdParam>;
 
-    const [firebaseUid, targetUser] = [
-      req.user!.uid,
-      await User.findById(id).select("_id isPublic").lean(),
-    ];
+    const targetUser = await User.findById(id).select("_id isPublic").lean();
     if (!targetUser) {
       res.status(404).json({ error: "User not found" });
       return;
@@ -74,12 +70,12 @@ router.get(
 
     // Private accounts gate their passport behind the existing follow rules.
     if (!targetUser.isPublic) {
-      const viewer = await User.findOne({ firebaseUid }).select("_id").lean();
-      if (!viewer) {
+      const viewerId = req.user?.userId;
+      if (!viewerId) {
         res.status(404).json({ error: "User not found" });
         return;
       }
-      if (viewer._id.toString() !== id) {
+      if (viewerId !== id) {
         const { canViewProfile } = await import(
           "../services/visibility-service"
         );
@@ -89,7 +85,7 @@ router.get(
           res.status(404).json({ error: "User not found" });
           return;
         }
-        const allowed = await canViewProfile(viewer._id, fullTarget);
+        const allowed = await canViewProfile(viewerId, fullTarget);
         if (!allowed) {
           res.status(403).json({ error: "This passport is private." });
           return;

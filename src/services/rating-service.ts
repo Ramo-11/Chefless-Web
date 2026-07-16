@@ -301,7 +301,7 @@ export async function listPendingCookPrompts(
     normalizedOverride ?? user?.timezoneOffsetMinutes ?? 0;
 
   // Opportunistically keep the user's last-known zone fresh (fire-and-forget,
-  // mirrors recordAiUsage). Only when a fresh override differs from stored.
+  // mirrors reserveAiQuota). Only when a fresh override differs from stored.
   if (
     normalizedOverride !== undefined &&
     normalizedOverride !== user?.timezoneOffsetMinutes

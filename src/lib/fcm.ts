@@ -1,5 +1,6 @@
 import admin from "firebase-admin";
 import User from "../models/User";
+import { logger } from "./logger";
 
 interface PushData {
   [key: string]: string;
@@ -29,8 +30,8 @@ export async function sendPushNotification(
   badge?: number
 ): Promise<void> {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    console.error(
-      "FCM: FIREBASE_SERVICE_ACCOUNT_KEY is not set — push notifications disabled."
+    logger.error(
+      "FCM: FIREBASE_SERVICE_ACCOUNT_KEY is not set, push notifications disabled"
     );
     return;
   }
@@ -38,7 +39,7 @@ export async function sendPushNotification(
   try {
     const credential = admin.app().options.credential;
     if (!credential) {
-      console.error("FCM: No credential attached to Firebase Admin app.");
+      logger.error("FCM: no credential attached to Firebase Admin app");
       return;
     }
 
@@ -91,24 +92,24 @@ export async function sendPushNotification(
         responseBody.includes("UNREGISTERED") ||
         responseBody.includes("INVALID_ARGUMENT")
       ) {
-        console.info(
-          `FCM: Stale token detected — removing (prefix: ${fcmToken.slice(0, 8)}…)`
+        logger.info(
+          { tokenPrefix: fcmToken.slice(0, 8) },
+          "FCM: stale token detected, removing"
         );
         User.findOneAndUpdate(
           { fcmToken },
           { $unset: { fcmToken: "" } }
         ).catch((err: unknown) => {
-          console.error(
-            `FCM: Failed to clear stale token: ${err instanceof Error ? err.message : err}`
-          );
+          logger.error({ err }, "FCM: failed to clear stale token");
         });
       } else {
-        console.error(`FCM: Send failed (HTTP ${response.status}): ${responseBody}`);
+        logger.error(
+          { status: response.status, body: responseBody },
+          "FCM: send failed"
+        );
       }
     }
   } catch (err: unknown) {
-    console.error(
-      `FCM: Exception — ${err instanceof Error ? err.message : "Unknown error"}`
-    );
+    logger.error({ err }, "FCM: send threw");
   }
 }

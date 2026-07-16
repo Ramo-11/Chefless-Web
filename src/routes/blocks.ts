@@ -3,7 +3,6 @@ import { z } from "zod";
 import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
   blockUser,
   unblockUser,
@@ -35,17 +34,13 @@ router.get(
   "/",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-
-    if (!currentUser) {
+    const currentUserId = req.user?.userId;
+    if (!currentUserId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const blocked = await listBlocked(currentUser._id.toString());
+    const blocked = await listBlocked(currentUserId);
     res.status(200).json({ blocked });
   })
 );
@@ -56,18 +51,14 @@ router.post(
   requireAuth,
   validate({ params: userIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-
-    if (!currentUser) {
+    const currentUserId = req.user?.userId;
+    if (!currentUserId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { userId } = req.params as z.infer<typeof userIdParam>;
-    const block = await blockUser(currentUser._id.toString(), userId);
+    const block = await blockUser(currentUserId, userId);
 
     res.status(201).json({ block });
   })
@@ -79,18 +70,14 @@ router.delete(
   requireAuth,
   validate({ params: userIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-
-    if (!currentUser) {
+    const currentUserId = req.user?.userId;
+    if (!currentUserId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { userId } = req.params as z.infer<typeof userIdParam>;
-    await unblockUser(currentUser._id.toString(), userId);
+    await unblockUser(currentUserId, userId);
 
     res.status(200).json({ success: true });
   })

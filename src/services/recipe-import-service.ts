@@ -8,6 +8,9 @@
  * No external packages needed — uses the Node 18+ built-in `fetch`.
  */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -97,15 +100,58 @@ export async function extractFromUrl(
 
   let html: string;
   try {
-    const response = await fetch(url, {
-      headers: {
-        // Polite user-agent — some sites block empty UA strings.
-        "User-Agent":
-          "Mozilla/5.0 (compatible; Chefless/1.0; +https://chefless.app)",
-        Accept: "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(10_000), // 10s timeout
-    });
+    // Redirects are followed manually so EVERY hop passes the SSRF guard.
+    // Automatic following would let a public page 302 to an internal address
+    // (cloud metadata, 10.x, localhost) and have Node fetch it before any
+    // post-hoc check could run.
+    const signal = AbortSignal.timeout(10_000); // one 10s deadline, all hops
+    let currentUrl = url;
+    let response: Response | undefined;
+
+    for (let hop = 0; hop <= MAX_IMPORT_REDIRECTS; hop++) {
+      if (hop > 0) {
+        try {
+          validateUrl(currentUrl);
+        } catch {
+          return { kind: "error", code: "PRIVATE_OR_BLOCKED" };
+        }
+      }
+      // validateUrl only string-matches the hostname; a public name can still
+      // resolve to a private address. Check what DNS actually returns.
+      const resolution = await checkResolvedAddresses(currentUrl);
+      if (resolution === "blocked") {
+        return { kind: "error", code: "PRIVATE_OR_BLOCKED" };
+      }
+      if (resolution === "unreachable") {
+        return { kind: "error", code: "UNREACHABLE" };
+      }
+
+      response = await fetch(currentUrl, {
+        headers: {
+          // Polite user-agent — some sites block empty UA strings.
+          "User-Agent":
+            "Mozilla/5.0 (compatible; Chefless/1.0; +https://chefless.app)",
+          Accept: "text/html,application/xhtml+xml",
+        },
+        redirect: "manual",
+        signal,
+      });
+
+      if (REDIRECT_STATUSES.has(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) {
+          return { kind: "error", code: "UNREACHABLE" };
+        }
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
+      break;
+    }
+
+    if (!response || REDIRECT_STATUSES.has(response.status)) {
+      // Redirect chain never settled within the hop budget.
+      return { kind: "error", code: "UNREACHABLE" };
+    }
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
@@ -115,7 +161,7 @@ export async function extractFromUrl(
     }
 
     // A redirect to a login wall presents as a 2xx on the auth host.
-    if (isLoginWallUrl(response.url)) {
+    if (isLoginWallUrl(currentUrl)) {
       return { kind: "error", code: "PRIVATE_OR_BLOCKED" };
     }
 
@@ -386,6 +432,12 @@ function decodeHtmlEntities(text: string): string {
 // URL validation
 // ---------------------------------------------------------------------------
 
+/** Redirect statuses that carry a Location header worth following. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Hop budget for manually followed redirects (initial request + 5 hops). */
+const MAX_IMPORT_REDIRECTS = 5;
+
 function validateUrl(url: string): void {
   let parsed: URL;
   try {
@@ -404,7 +456,13 @@ function validateUrl(url: string): void {
   // Strip IPv6 brackets if present
   const host = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
 
-  const isBlocked =
+  if (isBlockedHost(host)) {
+    throw new Error("That URL is not accessible.");
+  }
+}
+
+function isBlockedHost(host: string): boolean {
+  return (
     // Loopback
     host === "localhost" ||
     host === "127.0.0.1" ||
@@ -435,11 +493,41 @@ function validateUrl(url: string): void {
     host.startsWith("fd") ||
     // IPv6 unspecified
     host === "::" ||
-    host === "0:0:0:0:0:0:0:0";
+    host === "0:0:0:0:0:0:0:0"
+  );
+}
 
-  if (isBlocked) {
-    throw new Error("That URL is not accessible.");
+/**
+ * Resolves the URL's hostname and confirms no returned address falls in a
+ * blocked range. `validateUrl` only string-matches the hostname, so an
+ * attacker-controlled DNS name pointing at 169.254.169.254 or 10.x would pass
+ * it; this closes that hole. Literal IPs were already vetted by
+ * `validateUrl`, so they pass straight through. A resolve-then-connect gap
+ * (DNS rebinding) technically remains, but requires an attacker-run DNS
+ * server with near-zero TTL and buys only what this pre-check already
+ * restricts.
+ */
+async function checkResolvedAddresses(
+  url: string
+): Promise<"ok" | "blocked" | "unreachable"> {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return "blocked";
   }
+  const host = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  if (isIP(host)) return "ok";
+
+  let addresses: { address: string }[];
+  try {
+    addresses = await lookup(host, { all: true });
+  } catch {
+    return "unreachable";
+  }
+  return addresses.some((a) => isBlockedHost(a.address.toLowerCase()))
+    ? "blocked"
+    : "ok";
 }
 
 function isPrivateClassB(host: string): boolean {

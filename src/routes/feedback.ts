@@ -2,7 +2,6 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
   createFeedback,
   getMyFeedback,
@@ -27,16 +26,14 @@ router.post(
   validate({ body: createFeedbackSchema }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const user = await User.findOne({ firebaseUid: req.user!.uid })
-        .select("_id")
-        .lean();
-      if (!user) {
+      const userId = req.user?.userId;
+      if (!userId) {
         res.status(401).json({ error: "User not found" });
         return;
       }
 
       const feedback = await createFeedback({
-        userId: user._id.toString(),
+        userId,
         ...req.body,
       });
 
@@ -60,10 +57,8 @@ router.get(
   validate({ query: listMineSchema }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const user = await User.findOne({ firebaseUid: req.user!.uid })
-        .select("_id")
-        .lean();
-      if (!user) {
+      const userId = req.user?.userId;
+      if (!userId) {
         res.status(401).json({ error: "User not found" });
         return;
       }
@@ -73,7 +68,7 @@ router.get(
       >;
 
       const result = await getMyFeedback({
-        userId: user._id.toString(),
+        userId,
         page,
         limit,
       });

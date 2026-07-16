@@ -1,7 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { Types } from "mongoose";
 import { requireAuth } from "../middleware/auth";
-import User from "../models/User";
 import {
   listPendingCookPrompts,
   skipCookPrompt,
@@ -23,15 +22,14 @@ router.get(
   "/",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const tz = offsetFromQuery(req.query.timezoneOffsetMinutes);
-    const prompts = await listPendingCookPrompts(user._id.toString(), tz);
+    const prompts = await listPendingCookPrompts(userId, tz);
     res.status(200).json({ prompts });
   })
 );
@@ -49,14 +47,13 @@ router.post(
       return;
     }
 
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    await skipCookPrompt(user._id.toString(), id);
+    await skipCookPrompt(userId, id);
     res.status(204).end();
   })
 );

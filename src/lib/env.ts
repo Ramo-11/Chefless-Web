@@ -153,6 +153,17 @@ function validateEnv(): Env {
     );
   }
 
+  // Every email path (crash alerts, premium purchase alerts, campaigns)
+  // silently no-ops without the key, which reads as "no purchases" or
+  // "no crashes" when the truth is "no email credentials".
+  if (parsed.NODE_ENV === "production" && !parsed.RESEND_API_KEY) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[env] RESEND_API_KEY is not set — all alert emails (crash reports, " +
+        "premium purchase notifications) are disabled."
+    );
+  }
+
   return parsed;
 }
 

@@ -4,6 +4,7 @@ import Recipe from "../../models/Recipe";
 import Kitchen from "../../models/Kitchen";
 import ScheduleEntry from "../../models/ScheduleEntry";
 import Report from "../../models/Report";
+import { getAiUsageStats } from "../../services/ai-usage-service";
 import { logger } from "../../lib/logger";
 
 interface DailyCount {
@@ -477,6 +478,9 @@ export async function analyticsPage(
     const recipesChartData = fillDailyCounts(recipesDaily, 30);
     const scheduleChartData = fillWeeklyCounts(scheduleWeekly, 12);
 
+    // AI usage (lifetime counters on User; includes seed-free history)
+    const aiUsage = await getAiUsageStats();
+
     res.render("analytics", {
       page: "analytics",
 
@@ -539,6 +543,9 @@ export async function analyticsPage(
       // Tables
       topLikedRecipes,
       topRemixedRecipes,
+
+      // AI usage
+      aiUsage,
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to load analytics");

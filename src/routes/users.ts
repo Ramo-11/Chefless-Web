@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import mongoose from "mongoose";
+import mongoose, { Types } from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import User from "../models/User";
@@ -85,17 +85,16 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { q } = req.query as z.infer<typeof searchQuerySchema>;
 
-    const firebaseUid = req.user!.uid;
-    const caller = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!caller) {
+    if (!userId) {
       res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
 
     // Exclude users involved in a block relationship with the caller in either
     // direction, matching the dedicated /api/search route's behavior.
-    const blockedIds = await getBlockedUserIds(caller._id.toString());
+    const blockedIds = await getBlockedUserIds(userId);
 
     const users = await User.find(
       {
@@ -152,10 +151,9 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!user) {
+    if (!userId) {
       res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
@@ -163,7 +161,7 @@ router.get(
     const { page, limit } = req.query as unknown as z.infer<
       typeof paginationSchema
     >;
-    const result = await getFollowers(user._id.toString(), page, limit);
+    const result = await getFollowers(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -175,10 +173,9 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!user) {
+    if (!userId) {
       res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
@@ -186,7 +183,7 @@ router.get(
     const { page, limit } = req.query as unknown as z.infer<
       typeof paginationSchema
     >;
-    const result = await getFollowing(user._id.toString(), page, limit);
+    const result = await getFollowing(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -198,16 +195,15 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!user) {
+    if (!userId) {
       res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
 
     const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
-    const result = await getPendingRequests(user._id.toString(), page, limit);
+    const result = await getPendingRequests(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -219,16 +215,15 @@ router.patch(
   requireAuth,
   validate({ body: updateProfileSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const updates = req.body as z.infer<typeof updateProfileSchema>;
-    const user = await updateProfile(currentUser._id.toString(), updates);
+    const user = await updateProfile(userId, updates);
 
     res.status(200).json({ user });
   })
@@ -239,15 +234,14 @@ router.delete(
   "/me",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    await deleteAccount(currentUser._id.toString());
+    await deleteAccount(userId);
 
     res.status(200).json({ success: true });
   })
@@ -259,20 +253,19 @@ router.post(
   requireAuth,
   validate({ body: signatureBodySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { image } = req.body as z.infer<typeof signatureBodySchema>;
 
-    const result = await uploadImage(image, `users/${currentUser._id}/profile-pictures`);
+    const result = await uploadImage(image, `users/${userId}/profile-pictures`);
 
     const user = await User.findByIdAndUpdate(
-      currentUser._id,
+      userId,
       { $set: { profilePicture: result.secureUrl } },
       { new: true }
     );
@@ -287,20 +280,19 @@ router.post(
   requireAuth,
   validate({ body: signatureBodySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { image } = req.body as z.infer<typeof signatureBodySchema>;
 
-    const result = await uploadImage(image, `users/${currentUser._id}/signatures`);
+    const result = await uploadImage(image, `users/${userId}/signatures`);
 
     const user = await User.findByIdAndUpdate(
-      currentUser._id,
+      userId,
       { $set: { signature: result.secureUrl } },
       { new: true }
     );
@@ -314,16 +306,15 @@ router.delete(
   "/me/signature",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const user = await User.findByIdAndUpdate(
-      currentUser._id,
+      userId,
       { $unset: { signature: 1 } },
       { new: true }
     );
@@ -338,16 +329,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const follow = await acceptFollowRequest(currentUser._id.toString(), id);
+    const follow = await acceptFollowRequest(userId, id);
 
     res.status(200).json({ follow });
   })
@@ -359,16 +349,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await denyFollowRequest(currentUser._id.toString(), id);
+    await denyFollowRequest(userId, id);
 
     res.status(200).json({ success: true });
   })
@@ -380,13 +369,11 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
 
-    const requesterId = currentUser ? currentUser._id.toString() : undefined;
-    const profile = await getUserById(id, requesterId);
+    const profile = await getUserById(id, userId);
 
     if (!profile) {
       res.status(404).json({ error: "User not found" });
@@ -395,8 +382,8 @@ router.get(
 
     // Include follow status if viewing another user
     let followStatus: { following: boolean; status: "active" | "pending" | null } | undefined;
-    if (currentUser && !currentUser._id.equals(id)) {
-      followStatus = await isFollowing(currentUser._id.toString(), id);
+    if (userId && !new Types.ObjectId(userId).equals(id)) {
+      followStatus = await isFollowing(userId, id);
     }
 
     res.status(200).json({ user: profile, followStatus });
@@ -414,10 +401,9 @@ router.get(
       typeof paginationSchema
     >;
 
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
@@ -431,18 +417,18 @@ router.get(
     }
 
     // Enforce visibility rules matching canViewRecipe
-    const isSelf = currentUser._id.equals(id);
+    const isSelf = new Types.ObjectId(userId).equals(id);
     if (!isSelf) {
       if (!targetUser.isPublic) {
         // Check if requester follows the target
         const follow = await (await import("../models/Follow")).default.findOne({
-          followerId: currentUser._id,
+          followerId: new Types.ObjectId(userId),
           followingId: targetUser._id,
           status: "active",
         }).lean();
 
         // Check if they share a kitchen
-        const viewer = await User.findById(currentUser._id).select("kitchenId").lean();
+        const viewer = await User.findById(userId).select("kitchenId").lean();
         const sameKitchen =
           targetUser.kitchenId &&
           viewer?.kitchenId &&
@@ -469,7 +455,7 @@ router.get(
     const { getBlockedUserIds } = await import(
       "../services/block-service"
     );
-    const blockedIds = await getBlockedUserIds(currentUser._id.toString());
+    const blockedIds = await getBlockedUserIds(userId);
     if (blockedIds.some((id) => id.equals(targetUser._id))) {
       // Any block either direction hides the whole profile listing
       res.status(200).json({ data: [], page, limit, total: 0, totalPages: 0 });
@@ -513,9 +499,8 @@ router.get(
       typeof paginationSchema
     >;
 
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(401).json({ error: "User not found. Please register first." });
       return;
     }
@@ -525,7 +510,7 @@ router.get(
     );
     const result = await listUserCookbooks(
       id,
-      currentUser._id.toString(),
+      userId,
       page,
       limit
     );
@@ -539,16 +524,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const result = await followUser(currentUser._id.toString(), id);
+    const result = await followUser(userId, id);
 
     res.status(201).json(result);
   })
@@ -560,16 +544,15 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await unfollowUser(currentUser._id.toString(), id);
+    await unfollowUser(userId, id);
 
     res.status(200).json({ success: true });
   })

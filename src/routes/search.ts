@@ -610,17 +610,13 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { q, type, page, limit } = req.query as unknown as SearchQuery;
 
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const viewerId = currentUser._id;
+    const viewerId = new Types.ObjectId(userId);
     // Load the block exclusion set once and share across the user + recipe
     // searches. Kitchen search is not filtered by blocks because a kitchen is
     // a group resource, not a single user — the block list gates profile and

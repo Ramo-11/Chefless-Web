@@ -3,7 +3,6 @@ import { z } from "zod";
 import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
   createList,
   getLists,
@@ -108,18 +107,17 @@ const generateSchema = z.object({
   name: z.string().min(1).max(200).trim().optional(),
 });
 
-// --- Helper to resolve Firebase UID to Mongo user ID ---
+// --- Helper to resolve the caller's Mongo user ID (attached by requireAuth) ---
 
 async function resolveUserId(req: Request, res: Response): Promise<string | null> {
-  const firebaseUid = req.user!.uid;
-  const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+  const userId = req.user?.userId;
 
-  if (!currentUser) {
+  if (!userId) {
     res.status(404).json({ error: "User not found" });
     return null;
   }
 
-  return currentUser._id.toString();
+  return userId;
 }
 
 // --- Routes ---

@@ -41,12 +41,10 @@ export async function requireAuth(
 
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = {
-      uid: decodedToken.uid,
-      email: decodedToken.email,
-    };
 
-    // Check if user is banned
+    // One lookup serves both the ban check and the Mongo user id that
+    // downstream handlers need, so each request hits the users collection
+    // once instead of twice.
     const user = await User.findOne({ firebaseUid: decodedToken.uid })
       .select("isBanned")
       .lean();
@@ -57,6 +55,12 @@ export async function requireAuth(
       });
       return;
     }
+
+    req.user = {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      userId: user?._id?.toString(),
+    };
 
     next();
   } catch {

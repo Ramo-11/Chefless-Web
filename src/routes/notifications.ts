@@ -77,10 +77,8 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -89,7 +87,7 @@ router.get(
       typeof paginationSchema
     >;
     const result = await getNotifications(
-      currentUser._id.toString(),
+      userId,
       page,
       limit
     );
@@ -103,15 +101,13 @@ router.get(
   "/unread-count",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const count = await getUnreadCount(currentUser._id.toString());
+    const count = await getUnreadCount(userId);
 
     res.status(200).json({ count });
   })
@@ -123,16 +119,14 @@ router.post(
   requireAuth,
   validate({ body: markReadSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { ids } = req.body as z.infer<typeof markReadSchema>;
-    const modifiedCount = await markAsRead(currentUser._id.toString(), ids);
+    const modifiedCount = await markAsRead(userId, ids);
 
     res.status(200).json({ success: true, modifiedCount });
   })
@@ -143,15 +137,13 @@ router.post(
   "/read-all",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const modifiedCount = await markAllAsRead(currentUser._id.toString());
+    const modifiedCount = await markAllAsRead(userId);
 
     res.status(200).json({ success: true, modifiedCount });
   })
@@ -163,16 +155,14 @@ router.post(
   requireAuth,
   validate({ body: clearNotificationsSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { ids } = req.body as z.infer<typeof clearNotificationsSchema>;
-    const deletedCount = await clearNotifications(currentUser._id.toString(), ids);
+    const deletedCount = await clearNotifications(userId, ids);
 
     res.status(200).json({ success: true, deletedCount });
   })

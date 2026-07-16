@@ -3,7 +3,6 @@ import { z } from "zod";
 import mongoose from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
   createRecipe,
   getRecipe,
@@ -35,8 +34,8 @@ import {
   type ImportErrorCode,
 } from "../services/recipe-import-service";
 import {
-  assertImportAllowed,
-  recordImportUsage,
+  reserveImportQuota,
+  releaseAiQuota,
   aiExtractRecipeFromCaption,
   getAiUsage,
 } from "../services/ai-recipe-service";
@@ -177,10 +176,8 @@ router.get(
   requireAuth,
   validate({ query: listRecipesQuerySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -188,7 +185,7 @@ router.get(
     const { page, limit, label, dietaryTag, cuisineTag, sort } =
       req.query as unknown as z.infer<typeof listRecipesQuerySchema>;
 
-    const result = await listMyRecipes(user._id.toString(), page, limit, {
+    const result = await listMyRecipes(userId, page, limit, {
       label,
       dietaryTag,
       cuisineTag,
@@ -205,16 +202,14 @@ router.post(
   requireAuth,
   validate({ body: createRecipeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const data = req.body as z.infer<typeof createRecipeSchema>;
-    const recipe = await createRecipe(user._id.toString(), data);
+    const recipe = await createRecipe(userId, data);
 
     res.status(201).json({ recipe });
   })
@@ -226,16 +221,14 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
-    const result = await listLikedRecipes(user._id.toString(), page, limit);
+    const result = await listLikedRecipes(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -247,16 +240,14 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
-    const result = await listSavedRecipes(user._id.toString(), page, limit);
+    const result = await listSavedRecipes(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -268,16 +259,14 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { page, limit } = req.query as unknown as z.infer<typeof paginationSchema>;
-    const result = await listForkedRecipes(user._id.toString(), page, limit);
+    const result = await listForkedRecipes(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -289,16 +278,14 @@ router.post(
   requireAuth,
   validate({ body: uploadPhotoSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { image } = req.body as z.infer<typeof uploadPhotoSchema>;
-    const result = await uploadRecipePhoto(image, `recipes/${user._id}`);
+    const result = await uploadRecipePhoto(image, `recipes/${userId}`);
 
     res.status(200).json(result);
   })
@@ -310,10 +297,8 @@ router.get(
   requireAuth,
   validate({ query: sharedWithMeQuerySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -322,7 +307,7 @@ router.get(
       typeof sharedWithMeQuerySchema
     >;
 
-    const result = await listSharedWithMe(user._id.toString(), cursor, limit);
+    const result = await listSharedWithMe(userId, cursor, limit);
     res.status(200).json(result);
   })
 );
@@ -333,11 +318,8 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const requesterId = user ? user._id.toString() : undefined;
+    const requesterId = req.user?.userId;
     const recipe = await getRecipe(id, requesterId);
 
     res.status(200).json({ recipe });
@@ -350,17 +332,15 @@ router.patch(
   requireAuth,
   validate({ params: objectIdParam, body: updateRecipeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const updates = req.body as z.infer<typeof updateRecipeSchema>;
-    const recipe = await updateRecipe(id, user._id.toString(), updates);
+    const recipe = await updateRecipe(id, userId, updates);
 
     res.status(200).json({ recipe });
   })
@@ -372,16 +352,14 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await deleteRecipe(id, user._id.toString());
+    await deleteRecipe(id, userId);
 
     res.status(200).json({ success: true });
   })
@@ -393,16 +371,14 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const recipe = await forkRecipe(id, user._id.toString());
+    const recipe = await forkRecipe(id, userId);
 
     res.status(201).json({ recipe });
   })
@@ -414,16 +390,14 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const recipe = await duplicateRecipe(id, user._id.toString());
+    const recipe = await duplicateRecipe(id, userId);
 
     res.status(201).json({ recipe });
   })
@@ -435,16 +409,14 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await likeRecipe(id, user._id.toString());
+    await likeRecipe(id, userId);
 
     res.status(200).json({ success: true });
   })
@@ -456,16 +428,14 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await unlikeRecipe(id, user._id.toString());
+    await unlikeRecipe(id, userId);
 
     res.status(200).json({ success: true });
   })
@@ -477,16 +447,14 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await saveRecipe(id, user._id.toString());
+    await saveRecipe(id, userId);
 
     res.status(200).json({ success: true });
   })
@@ -498,16 +466,14 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await unsaveRecipe(id, user._id.toString());
+    await unsaveRecipe(id, userId);
 
     res.status(200).json({ success: true });
   })
@@ -530,9 +496,8 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam, body: rateSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -541,7 +506,7 @@ router.post(
     const body = req.body as z.infer<typeof rateSchema>;
     const rating = await upsertRating({
       recipeId: id,
-      userId: user._id.toString(),
+      userId,
       stars: body.stars,
       note: body.note,
       scheduleEntryId: body.scheduleEntryId,
@@ -557,15 +522,14 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await deleteRating(id, user._id.toString());
+    await deleteRating(id, userId);
     res.status(200).json({ success: true });
   })
 );
@@ -576,16 +540,15 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const aggregate = await getRatingAggregateForViewer({
-      userId: user._id.toString(),
+      userId,
       recipeId: id,
     });
     res.status(200).json(aggregate);
@@ -600,16 +563,15 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const history = await getKitchenCookHistoryForRecipe(
-      user._id.toString(),
+      userId,
       id
     );
     res.status(200).json(history);
@@ -622,17 +584,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam, body: shareRecipeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const { recipientId, message } = req.body as z.infer<typeof shareRecipeSchema>;
-    const share = await shareRecipe(id, user._id.toString(), recipientId, message);
+    const share = await shareRecipe(id, userId, recipientId, message);
 
     res.status(201).json({ share });
   })
@@ -711,9 +671,8 @@ router.post(
   requireAuth,
   validate({ body: importRecipeSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -739,12 +698,23 @@ router.post(
       return;
     }
 
-    // Caption path — gated AI extraction.
-    const userId = user._id.toString();
-    await assertImportAllowed(userId, tz);
+    // Caption path — gated AI extraction. The quota unit is reserved before
+    // the billable call and handed back on any failure, so failed extractions
+    // never burn the cap and concurrent requests cannot overshoot it.
+    const reservation = await reserveImportQuota(userId, tz);
 
-    const recipe = await aiExtractRecipeFromCaption(result.text, url);
+    let recipe;
+    try {
+      recipe = await aiExtractRecipeFromCaption(result.text, url, {
+        userId,
+        feature: "import",
+      });
+    } catch (err) {
+      await releaseAiQuota(userId, reservation);
+      throw err;
+    }
     if (!recipe) {
+      await releaseAiQuota(userId, reservation);
       res.status(IMPORT_ERROR_STATUS.NO_RECIPE_FOUND).json({
         code: "NO_RECIPE_FOUND",
         error: IMPORT_ERROR_MESSAGE.NO_RECIPE_FOUND,
@@ -752,7 +722,6 @@ router.post(
       return;
     }
 
-    await recordImportUsage(userId, tz);
     const usage = await getAiUsage(userId, tz).catch(() => undefined);
 
     res.status(200).json({
@@ -770,9 +739,8 @@ router.post(
   requireAuth,
   validate({ body: importFromTextSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -780,11 +748,22 @@ router.post(
     const { text, sourceUrl, timezoneOffsetMinutes: tz } =
       req.body as z.infer<typeof importFromTextSchema>;
 
-    const userId = user._id.toString();
-    await assertImportAllowed(userId, tz);
+    // Reserve before the billable call, release on any failure (same contract
+    // as the URL import above).
+    const reservation = await reserveImportQuota(userId, tz);
 
-    const recipe = await aiExtractRecipeFromCaption(text, sourceUrl ?? "");
+    let recipe;
+    try {
+      recipe = await aiExtractRecipeFromCaption(text, sourceUrl ?? "", {
+        userId,
+        feature: "import",
+      });
+    } catch (err) {
+      await releaseAiQuota(userId, reservation);
+      throw err;
+    }
     if (!recipe) {
+      await releaseAiQuota(userId, reservation);
       res.status(IMPORT_ERROR_STATUS.NO_RECIPE_FOUND).json({
         code: "NO_RECIPE_FOUND",
         error: IMPORT_ERROR_MESSAGE.NO_RECIPE_FOUND,
@@ -792,7 +771,6 @@ router.post(
       return;
     }
 
-    await recordImportUsage(userId, tz);
     const usage = await getAiUsage(userId, tz).catch(() => undefined);
 
     const source = sourceUrl

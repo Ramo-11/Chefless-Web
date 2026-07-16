@@ -3,10 +3,9 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { requirePremium } from "../middleware/premium";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
-  assertAiQuota,
-  recordAiUsage,
+  reserveAiQuota,
+  releaseAiQuota,
   getAiUsage,
   aiGenerateFromIngredients,
   aiSuggestSubstitutions,
@@ -23,11 +22,8 @@ function asyncHandler(
   };
 }
 
-async function resolveMongoUserId(req: Request): Promise<string | null> {
-  const firebaseUid = req.user?.uid;
-  if (!firebaseUid) return null;
-  const u = await User.findOne({ firebaseUid }).select("_id").lean();
-  return u?._id.toString() ?? null;
+function resolveMongoUserId(req: Request): string | null {
+  return req.user?.userId ?? null;
 }
 
 /**
@@ -71,7 +67,7 @@ router.get(
   requireAuth,
   requirePremium,
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveMongoUserId(req);
+    const userId = resolveMongoUserId(req);
     if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
@@ -87,16 +83,21 @@ router.post(
   requirePremium,
   validate({ body: generateSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveMongoUserId(req);
+    const userId = resolveMongoUserId(req);
     if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const { prompt, timezoneOffsetMinutes: tz } =
       req.body as z.infer<typeof generateSchema>;
-    await assertAiQuota(userId, tz);
-    const recipe = await aiGenerateFromIngredients(prompt);
-    await recordAiUsage(userId, "generate", tz);
+    const reservation = await reserveAiQuota(userId, "generate", tz);
+    let recipe;
+    try {
+      recipe = await aiGenerateFromIngredients(prompt, { userId, feature: "generate" });
+    } catch (err) {
+      await releaseAiQuota(userId, reservation);
+      throw err;
+    }
     const usage = await getAiUsage(userId, tz);
     res.status(200).json({ recipe, usage });
   })
@@ -108,16 +109,24 @@ router.post(
   requirePremium,
   validate({ body: substituteSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveMongoUserId(req);
+    const userId = resolveMongoUserId(req);
     if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const body = req.body as z.infer<typeof substituteSchema>;
     const tz = body.timezoneOffsetMinutes;
-    await assertAiQuota(userId, tz);
-    const result = await aiSuggestSubstitutions(body.ingredients, body.dietaryNeed);
-    await recordAiUsage(userId, "substitutions", tz);
+    const reservation = await reserveAiQuota(userId, "substitutions", tz);
+    let result;
+    try {
+      result = await aiSuggestSubstitutions(body.ingredients, body.dietaryNeed, {
+        userId,
+        feature: "substitutions",
+      });
+    } catch (err) {
+      await releaseAiQuota(userId, reservation);
+      throw err;
+    }
     const usage = await getAiUsage(userId, tz);
     res.status(200).json({ ...result, usage });
   })
@@ -129,16 +138,21 @@ router.post(
   requirePremium,
   validate({ body: formatSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveMongoUserId(req);
+    const userId = resolveMongoUserId(req);
     if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const { notes, timezoneOffsetMinutes: tz } =
       req.body as z.infer<typeof formatSchema>;
-    await assertAiQuota(userId, tz);
-    const recipe = await aiFormatRoughNotes(notes);
-    await recordAiUsage(userId, "format", tz);
+    const reservation = await reserveAiQuota(userId, "format", tz);
+    let recipe;
+    try {
+      recipe = await aiFormatRoughNotes(notes, { userId, feature: "format" });
+    } catch (err) {
+      await releaseAiQuota(userId, reservation);
+      throw err;
+    }
     const usage = await getAiUsage(userId, tz);
     res.status(200).json({ recipe, usage });
   })

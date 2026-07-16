@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { getRevenueAnalytics } from "../../services/revenue-service";
+import { getAiCostAnalytics } from "../../services/ai-usage-service";
 import { logger } from "../../lib/logger";
 
 export async function revenuePage(
@@ -7,7 +8,10 @@ export async function revenuePage(
   res: Response
 ): Promise<void> {
   try {
-    const analytics = await getRevenueAnalytics();
+    const [analytics, aiCost] = await Promise.all([
+      getRevenueAnalytics(),
+      getAiCostAnalytics(),
+    ]);
 
     res.render("revenue", {
       page: "revenue",
@@ -30,6 +34,9 @@ export async function revenuePage(
       // Context notes
       sandboxCount: analytics.sandboxCount,
       dataSince: analytics.dataSince,
+
+      // AI spend (Claude), from the AiUsageEvent ledger
+      aiCost,
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to load revenue analytics");

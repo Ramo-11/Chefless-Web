@@ -64,14 +64,13 @@ router.post(
   requireAuth,
   validate({ body: uploadPhotoSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const { image } = req.body as z.infer<typeof uploadPhotoSchema>;
-    const result = await uploadCookedPostPhoto(image, user._id.toString());
+    const result = await uploadCookedPostPhoto(image, userId);
     res.status(200).json(result);
   })
 );
@@ -82,15 +81,14 @@ router.post(
   requireAuth,
   validate({ body: createCookedPostSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const body = req.body as z.infer<typeof createCookedPostSchema>;
     const result = await createCookedPost({
-      userId: user._id.toString(),
+      userId,
       recipeId: body.recipeId,
       photoUrl: body.photoUrl,
       caption: body.caption,
@@ -105,9 +103,8 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam, query: cursorSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -116,7 +113,7 @@ router.get(
       typeof cursorSchema
     >;
     const [page, count] = await Promise.all([
-      listCookedPostsForRecipe(id, user._id.toString(), cursor, limit),
+      listCookedPostsForRecipe(id, userId, cursor, limit),
       countCookedPostsForRecipe(id),
     ]);
     res.status(200).json({ ...page, total: count });
@@ -129,9 +126,8 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam, query: cursorSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const viewer = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!viewer) {
+    const viewerId = req.user?.userId;
+    if (!viewerId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -143,15 +139,15 @@ router.get(
       return;
     }
 
-    if (viewer._id.toString() !== id) {
+    if (viewerId !== id) {
       // Hide existence from blocked users entirely.
-      if (await isBlocked(viewer._id.toString(), id)) {
+      if (await isBlocked(viewerId, id)) {
         res.status(404).json({ error: "User not found" });
         return;
       }
       // Private accounts gate their feed behind the existing follow rules.
       if (!target.isPublic) {
-        const allowed = await canViewProfile(viewer._id, target);
+        const allowed = await canViewProfile(viewerId, target);
         if (!allowed) {
           res.status(403).json({ error: "This passport is private." });
           return;
@@ -181,9 +177,8 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam, body: removePostSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -191,7 +186,7 @@ router.post(
     const { reason } = req.body as z.infer<typeof removePostSchema>;
     await removeCookedPostByOwner({
       postId: id,
-      ownerId: user._id.toString(),
+      ownerId: userId,
       reason,
     });
     res.status(200).json({ success: true });
@@ -204,14 +199,13 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await deleteCookedPost(id, user._id.toString());
+    await deleteCookedPost(id, userId);
     res.status(200).json({ success: true });
   })
 );

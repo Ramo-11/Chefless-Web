@@ -4,7 +4,6 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { requirePremium } from "../middleware/premium";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import { getRemixTree } from "../services/remix-tree-service";
 
 const router = Router();
@@ -35,14 +34,13 @@ router.get(
   requirePremium,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const user = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!user) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const tree = await getRemixTree(id, user._id.toString());
+    const tree = await getRemixTree(id, userId);
     res.status(200).json(tree);
   })
 );

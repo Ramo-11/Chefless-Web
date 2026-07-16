@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import User from "../models/User";
 import { env } from "../lib/env";
+import { logger } from "../lib/logger";
+import { recordAiCall, AiCallMeta } from "./ai-usage-service";
 import { hasActivePremium } from "../lib/premium";
 import { normalizeOffset } from "../lib/timezone";
 import { FREE_TIER_RECIPE_LIMIT } from "./recipe-service";
@@ -97,79 +99,129 @@ export async function getAiUsage(
   return { used, limit: AI_DAILY_LIMIT };
 }
 
-export async function assertAiQuota(
+export interface AiQuotaReservation {
+  day: string;
+  feature: AiFeature;
+}
+
+function featureFieldFor(feature: AiFeature): string {
+  return feature === "generate"
+    ? "aiGenerateCount"
+    : feature === "substitutions"
+    ? "aiSubstitutionsCount"
+    : "aiFormatCount";
+}
+
+/**
+ * Atomically claims one unit of the user's daily AI quota BEFORE the billable
+ * Claude call runs. The guarded update re-evaluates the counter at write time,
+ * so concurrent requests cannot all pass a stale read the way a separate
+ * check-then-record pair could (each racing request would see the old count
+ * and every one of them would bill a Claude call past the cap).
+ *
+ * The daily, lifetime, and per-feature counters plus `aiLastUsedAt` (and the
+ * client-supplied timezone offset, kept fresh for admin visibility) advance in
+ * the same atomic write; a failed AI call must hand the unit back via
+ * {@link releaseAiQuota} so failures never burn the allowance.
+ *
+ * Throws 404 when the user does not exist and 429 when the day's allowance is
+ * already spent.
+ */
+export async function reserveAiQuota(
   userId: string,
-  offsetOverride?: number | null
-): Promise<void> {
-  const { used, limit } = await getAiUsage(userId, offsetOverride);
-  if (used >= limit) {
+  feature: AiFeature,
+  offsetOverride?: number | null,
+  opts?: { limit?: number; limitMessage?: string }
+): Promise<AiQuotaReservation> {
+  const existing = await User.findById(userId)
+    .select("timezoneOffsetMinutes")
+    .lean();
+  if (!existing) {
+    throw createError("User not found", 404);
+  }
+
+  const limit = opts?.limit ?? AI_DAILY_LIMIT;
+  const offset =
+    normalizeOffset(offsetOverride) ?? existing.timezoneOffsetMinutes ?? undefined;
+  const day = localDayKey(offset);
+  const featureField = featureFieldFor(feature);
+
+  const setStage: Record<string, unknown> = {
+    aiRecipeHelperUsageDay: day,
+    // New local day resets the daily counter to exactly 1 (this call);
+    // same day increments it.
+    aiRecipeHelperUsageCount: {
+      $cond: [
+        { $eq: ["$aiRecipeHelperUsageDay", day] },
+        { $add: [{ $ifNull: ["$aiRecipeHelperUsageCount", 0] }, 1] },
+        1,
+      ],
+    },
+    aiTotalMessagesSent: { $add: [{ $ifNull: ["$aiTotalMessagesSent", 0] }, 1] },
+    [featureField]: { $add: [{ $ifNull: [`$${featureField}`, 0] }, 1] },
+    aiLastUsedAt: "$$NOW",
+  };
+  const normalizedOverride = normalizeOffset(offsetOverride);
+  if (normalizedOverride !== undefined) {
+    setStage.timezoneOffsetMinutes = normalizedOverride;
+  }
+
+  const result = await User.updateOne(
+    {
+      _id: userId,
+      $or: [
+        // New local day: the counter resets, so the claim always fits.
+        { aiRecipeHelperUsageDay: { $ne: day } },
+        // Same day with room left. Comparison operators skip missing fields,
+        // so legacy docs with a day but no count need the explicit branch.
+        { aiRecipeHelperUsageCount: { $lt: limit } },
+        { aiRecipeHelperUsageCount: { $exists: false } },
+      ],
+    },
+    [{ $set: setStage }]
+  );
+
+  if (result.matchedCount === 0) {
     throw createError(
-      `Daily AI limit reached (${limit} uses). Try again tomorrow.`,
+      opts?.limitMessage ??
+        `Daily AI limit reached (${limit} uses). Try again tomorrow.`,
       429,
       "AI_QUOTA_EXCEEDED"
     );
   }
+
+  return { day, feature };
 }
 
 /**
- * Increments the user's daily + lifetime + per-feature AI counters and
- * stamps `aiLastUsedAt`. Also persists the client-supplied timezone offset
- * so the user record reflects their last-seen zone without a separate
- * endpoint.
- *
- * Rolls the daily counter over to `1` when the user's local day has changed;
- * otherwise `$inc`s it. Uses atomic updates so concurrent AI calls don't
- * lose increments the way a read-modify-write `.save()` loop would.
+ * Returns a reserved quota unit after a failed AI call so the failure does
+ * not burn the user's daily allowance. Best-effort: a rollback failure is
+ * logged, never thrown, so it cannot mask the original AI error.
  */
-export async function recordAiUsage(
+export async function releaseAiQuota(
   userId: string,
-  feature: AiFeature,
-  offsetOverride?: number | null
+  reservation: AiQuotaReservation
 ): Promise<void> {
-  const existing = await User.findById(userId)
-    .select("aiRecipeHelperUsageDay timezoneOffsetMinutes")
-    .lean();
-
-  const offset =
-    normalizeOffset(offsetOverride) ?? existing?.timezoneOffsetMinutes ?? undefined;
-  const day = localDayKey(offset);
-
-  const featureField =
-    feature === "generate"
-      ? "aiGenerateCount"
-      : feature === "substitutions"
-      ? "aiSubstitutionsCount"
-      : "aiFormatCount";
-
-  const rolledOver = existing?.aiRecipeHelperUsageDay !== day;
-
-  const setFields: Record<string, unknown> = {
-    aiLastUsedAt: new Date(),
-    aiRecipeHelperUsageDay: day,
-  };
-  const normalizedOverride = normalizeOffset(offsetOverride);
-  if (normalizedOverride !== undefined) {
-    setFields.timezoneOffsetMinutes = normalizedOverride;
-  }
-
-  const incFields: Record<string, number> = {
-    aiTotalMessagesSent: 1,
-    [featureField]: 1,
-  };
-
-  if (rolledOver) {
-    // New local day — reset the daily counter to exactly 1 (this call).
-    await User.updateOne(
-      { _id: userId },
-      { $set: { ...setFields, aiRecipeHelperUsageCount: 1 }, $inc: incFields }
-    );
-  } else {
-    await User.updateOne(
-      { _id: userId },
+  const featureField = featureFieldFor(reservation.feature);
+  const lifetimeDec = { aiTotalMessagesSent: -1, [featureField]: -1 };
+  try {
+    const result = await User.updateOne(
       {
-        $set: setFields,
-        $inc: { ...incFields, aiRecipeHelperUsageCount: 1 },
-      }
+        _id: userId,
+        aiRecipeHelperUsageDay: reservation.day,
+        aiRecipeHelperUsageCount: { $gt: 0 },
+      },
+      { $inc: { ...lifetimeDec, aiRecipeHelperUsageCount: -1 } }
+    );
+    if (result.matchedCount === 0) {
+      // The local day rolled over between reserve and release; the daily
+      // counter was already reset, so only the lifetime counters roll back.
+      await User.updateOne({ _id: userId }, { $inc: lifetimeDec });
+    }
+  } catch (err) {
+    logger.error(
+      { err, userId, reservation },
+      "Failed to release reserved AI quota"
     );
   }
 }
@@ -186,7 +238,11 @@ function extractJsonObject(text: string): string {
   return trimmed;
 }
 
-async function runRecipeJsonPrompt(system: string, userMessage: string): Promise<ImportedRecipe> {
+async function runRecipeJsonPrompt(
+  system: string,
+  userMessage: string,
+  meta?: AiCallMeta
+): Promise<ImportedRecipe> {
   const client = getClient();
   const resp = await client.messages.create({
     model: "claude-haiku-4-5",
@@ -194,6 +250,7 @@ async function runRecipeJsonPrompt(system: string, userMessage: string): Promise
     system,
     messages: [{ role: "user", content: userMessage }],
   });
+  if (meta) recordAiCall(meta, "claude-haiku-4-5", resp.usage);
   const block = resp.content.find((b) => b.type === "text");
   if (!block || block.type !== "text") {
     throw createError("AI returned no text", 502);
@@ -243,19 +300,24 @@ const JSON_ONLY_SYSTEM = `You are a cooking assistant for the Chefless app. Repl
 }
 Use sensible metric/imperial units (e.g. g, ml, tsp, cup).`;
 
-export async function aiGenerateFromIngredients(prompt: string): Promise<ImportedRecipe> {
+export async function aiGenerateFromIngredients(
+  prompt: string,
+  meta?: AiCallMeta
+): Promise<ImportedRecipe> {
   const p = prompt.trim();
   if (!p) throw createError("Prompt is required", 400);
   if (p.length > 4000) throw createError("Prompt is too long", 400);
   return runRecipeJsonPrompt(
     JSON_ONLY_SYSTEM,
-    `Create a complete recipe from what the user has. User input:\n${p}`
+    `Create a complete recipe from what the user has. User input:\n${p}`,
+    meta
   );
 }
 
 export async function aiSuggestSubstitutions(
   ingredients: string,
-  dietaryNeed: string
+  dietaryNeed: string,
+  meta?: AiCallMeta
 ): Promise<{ substitutions: { original: string; replacement: string; note?: string }[] }> {
   const ing = ingredients.trim();
   const need = dietaryNeed.trim();
@@ -284,6 +346,7 @@ export async function aiSuggestSubstitutions(
       },
     ],
   });
+  if (meta) recordAiCall(meta, "claude-haiku-4-5", resp.usage);
   const block = resp.content.find((b) => b.type === "text");
   if (!block || block.type !== "text") {
     throw createError("AI returned no text", 502);
@@ -297,13 +360,17 @@ export async function aiSuggestSubstitutions(
   return subSchema.parse(parsed);
 }
 
-export async function aiFormatRoughNotes(notes: string): Promise<ImportedRecipe> {
+export async function aiFormatRoughNotes(
+  notes: string,
+  meta?: AiCallMeta
+): Promise<ImportedRecipe> {
   const n = notes.trim();
   if (!n) throw createError("Notes are required", 400);
   if (n.length > 12000) throw createError("Notes are too long", 400);
   return runRecipeJsonPrompt(
     JSON_ONLY_SYSTEM,
-    `Turn these rough cooking notes into a structured recipe with estimated quantities and clear steps:\n${n}`
+    `Turn these rough cooking notes into a structured recipe with estimated quantities and clear steps:\n${n}`,
+    meta
   );
 }
 
@@ -344,7 +411,8 @@ Otherwise reply with a single JSON object in this shape:
  */
 export async function aiExtractRecipeFromCaption(
   caption: string,
-  sourceUrl: string
+  sourceUrl: string,
+  meta?: AiCallMeta
 ): Promise<ImportedRecipe | null> {
   const trimmed = caption.trim();
   if (!trimmed) throw createError("Caption is required", 400);
@@ -361,6 +429,7 @@ export async function aiExtractRecipeFromCaption(
       },
     ],
   });
+  if (meta) recordAiCall(meta, "claude-haiku-4-5", resp.usage);
 
   // Treat any non-recipe outcome (sentinel, no text block, unparseable JSON,
   // schema mismatch, empty ingredients/steps, missing title) as null so the
@@ -422,32 +491,31 @@ export async function aiExtractRecipeFromCaption(
 /**
  * Enforces the AI-import gate WITHOUT consuming it.
  *
- * Premium users fall through to the existing daily quota check. For free users
- * the import feature itself is not the restriction — the recipe count is: they
- * may keep importing until originals + saved reach {@link FREE_TIER_RECIPE_LIMIT}
+ * Premium users draw from the shared daily AI quota. For free users the import
+ * feature itself is not the restriction — the recipe count is: they may keep
+ * importing until originals + saved reach {@link FREE_TIER_RECIPE_LIMIT}
  * (throws 403 `RECIPE_LIMIT_REACHED`, matching the create/save cap). A separate
  * per-day ceiling ({@link FREE_IMPORT_DAILY_LIMIT}, 429 `AI_QUOTA_EXCEEDED`)
- * guards against re-running the billable AI read without ever saving.
+ * guards against re-running the billable AI read without ever saving. Both
+ * pools read the same `aiRecipeHelperUsageCount`; only the ceiling differs.
  *
- * The daily counter is only advanced later by {@link recordImportUsage} after a
- * successful extraction, so a failed import does not burn the cap.
+ * The quota unit is reserved atomically BEFORE the billable extraction runs;
+ * the caller must hand it back via {@link releaseAiQuota} when extraction
+ * fails, so a failed import does not burn the cap.
  */
-export async function assertImportAllowed(
+export async function reserveImportQuota(
   userId: string,
   offsetOverride?: number | null
-): Promise<void> {
+): Promise<AiQuotaReservation> {
   const user = await User.findById(userId)
-    .select(
-      "isPremium premiumExpiresAt originalRecipesCount savedRecipesCount aiRecipeHelperUsageDay aiRecipeHelperUsageCount timezoneOffsetMinutes"
-    )
+    .select("isPremium premiumExpiresAt originalRecipesCount savedRecipesCount")
     .lean();
   if (!user) {
     throw createError("User not found", 404);
   }
 
   if (hasActivePremium(user)) {
-    await assertAiQuota(userId, offsetOverride);
-    return;
+    return reserveAiQuota(userId, "generate", offsetOverride);
   }
 
   const recipeCount =
@@ -460,31 +528,8 @@ export async function assertImportAllowed(
     );
   }
 
-  const offset =
-    normalizeOffset(offsetOverride) ?? user.timezoneOffsetMinutes ?? undefined;
-  const day = localDayKey(offset);
-  const usedToday =
-    user.aiRecipeHelperUsageDay === day
-      ? user.aiRecipeHelperUsageCount ?? 0
-      : 0;
-  if (usedToday >= FREE_IMPORT_DAILY_LIMIT) {
-    throw createError(
-      `Daily import limit reached (${FREE_IMPORT_DAILY_LIMIT}). Try again tomorrow.`,
-      429,
-      "AI_QUOTA_EXCEEDED"
-    );
-  }
-}
-
-/**
- * Records a successful AI import by advancing the shared daily AI counter (as
- * the `generate` feature) and stamping `aiLastUsedAt`. Free users are bounded
- * by {@link FREE_IMPORT_DAILY_LIMIT} and premium users by {@link AI_DAILY_LIMIT}
- * — both read the same `aiRecipeHelperUsageCount`, only the ceiling differs.
- */
-export async function recordImportUsage(
-  userId: string,
-  offsetOverride?: number | null
-): Promise<void> {
-  await recordAiUsage(userId, "generate", offsetOverride);
+  return reserveAiQuota(userId, "generate", offsetOverride, {
+    limit: FREE_IMPORT_DAILY_LIMIT,
+    limitMessage: `Daily import limit reached (${FREE_IMPORT_DAILY_LIMIT}). Try again tomorrow.`,
+  });
 }

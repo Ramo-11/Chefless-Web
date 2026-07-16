@@ -1,6 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { requireAuth } from "../middleware/auth";
-import User from "../models/User";
 import { getAppConfig, toAppConfigPayload } from "../lib/app-config";
 
 const router = Router();
@@ -20,12 +19,9 @@ router.get(
   "/",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const [user, config] = await Promise.all([
-      User.findOne({ firebaseUid }).select("_id").lean(),
-      getAppConfig(),
-    ]);
-    if (!user) {
+    const userId = req.user?.userId;
+    const config = await getAppConfig();
+    if (!userId) {
       // Unknown user (signed up with Firebase but hasn't completed registration
       // yet) — treat as not in the test list. Global flag still applies.
       res.status(200).json({
@@ -35,7 +31,7 @@ router.get(
       });
       return;
     }
-    res.status(200).json(toAppConfigPayload(config, user._id));
+    res.status(200).json(toAppConfigPayload(config, userId));
   })
 );
 

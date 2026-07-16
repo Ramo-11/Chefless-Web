@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  assertImportAllowed,
-  recordImportUsage,
+  reserveImportQuota,
+  releaseAiQuota,
 } from "../../services/ai-recipe-service";
 import { createTestUser } from "../helpers";
 import User from "../../models/User";
@@ -11,11 +11,9 @@ describe("ai import gating", () => {
     const user = await createTestUser();
     const userId = user._id.toString();
 
-    // Under the cap: allowed, and each import advances the daily counter.
-    await expect(assertImportAllowed(userId)).resolves.toBeUndefined();
-    await recordImportUsage(userId);
-    await expect(assertImportAllowed(userId)).resolves.toBeUndefined();
-    await recordImportUsage(userId);
+    // Under the cap: allowed, and each reservation advances the daily counter.
+    await expect(reserveImportQuota(userId)).resolves.toBeDefined();
+    await expect(reserveImportQuota(userId)).resolves.toBeDefined();
 
     const after = await User.findById(userId)
       .select("aiRecipeHelperUsageCount aiLastUsedAt")
@@ -34,7 +32,7 @@ describe("ai import gating", () => {
     );
 
     try {
-      await assertImportAllowed(userId);
+      await reserveImportQuota(userId);
       expect.fail("Should have thrown once the recipe cap is reached");
     } catch (err: unknown) {
       const e = err as Error & { statusCode?: number; code?: string };
@@ -49,12 +47,11 @@ describe("ai import gating", () => {
 
     // Spend the full daily allowance without ever saving a recipe.
     for (let i = 0; i < 10; i++) {
-      await assertImportAllowed(userId);
-      await recordImportUsage(userId);
+      await reserveImportQuota(userId);
     }
 
     try {
-      await assertImportAllowed(userId);
+      await reserveImportQuota(userId);
       expect.fail("Should have thrown after the daily import cap is spent");
     } catch (err: unknown) {
       const e = err as Error & { statusCode?: number; code?: string };
@@ -63,18 +60,39 @@ describe("ai import gating", () => {
     }
   });
 
-  it("does not burn the daily cap on a failed extraction (assert only)", async () => {
+  it("does not burn the daily cap on a failed extraction (reserve + release)", async () => {
     const user = await createTestUser();
     const userId = user._id.toString();
 
-    await assertImportAllowed(userId);
-    // No recordImportUsage call (extraction failed) -> still allowed.
-    await expect(assertImportAllowed(userId)).resolves.toBeUndefined();
+    const reservation = await reserveImportQuota(userId);
+    // Extraction failed -> the unit goes back and the counters roll back.
+    await releaseAiQuota(userId, reservation);
+    await expect(reserveImportQuota(userId)).resolves.toBeDefined();
+
+    const stored = await User.findById(userId)
+      .select("aiRecipeHelperUsageCount aiTotalMessagesSent aiGenerateCount")
+      .lean();
+    expect(stored?.aiRecipeHelperUsageCount).toBe(1);
+    expect(stored?.aiTotalMessagesSent).toBe(1);
+    expect(stored?.aiGenerateCount).toBe(1);
+  });
+
+  it("blocks concurrent requests from overshooting the daily cap", async () => {
+    const user = await createTestUser();
+    const userId = user._id.toString();
+
+    // 15 simultaneous reservations against a cap of 10: the guarded atomic
+    // update must admit exactly 10, no matter how the requests interleave.
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: 15 }, () => reserveImportQuota(userId))
+    );
+    const granted = outcomes.filter((o) => o.status === "fulfilled").length;
+    expect(granted).toBe(10);
 
     const stored = await User.findById(userId)
       .select("aiRecipeHelperUsageCount")
       .lean();
-    expect(stored?.aiRecipeHelperUsageCount ?? 0).toBe(0);
+    expect(stored?.aiRecipeHelperUsageCount).toBe(10);
   });
 
   it("gates premium users by the daily AI quota, not the recipe cap", async () => {
@@ -86,8 +104,7 @@ describe("ai import gating", () => {
     );
     const userId = user._id.toString();
 
-    await assertImportAllowed(userId);
-    await recordImportUsage(userId);
+    await reserveImportQuota(userId);
 
     const stored = await User.findById(userId)
       .select("aiGenerateCount aiRecipeHelperUsageCount")

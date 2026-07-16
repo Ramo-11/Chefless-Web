@@ -3,7 +3,6 @@ import { z } from "zod";
 import { Types } from "mongoose";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import User from "../models/User";
 import {
   forYouFeed,
   trendingFeed,
@@ -29,19 +28,15 @@ const paginationSchema = z.object({
 type PaginationQuery = z.infer<typeof paginationSchema>;
 
 /**
- * Resolves the current user's MongoDB ObjectId from their Firebase UID.
+ * Returns the current user's MongoDB ObjectId, resolved by `requireAuth`.
  */
-async function resolveUserId(
-  req: Request,
-  res: Response
-): Promise<Types.ObjectId | null> {
-  const firebaseUid = req.user!.uid;
-  const user = await User.findOne({ firebaseUid }).select("_id").lean();
-  if (!user) {
+function resolveUserId(req: Request, res: Response): Types.ObjectId | null {
+  const userId = req.user?.userId;
+  if (!userId) {
     res.status(404).json({ error: "User not found" });
     return null;
   }
-  return user._id;
+  return new Types.ObjectId(userId);
 }
 
 // GET /api/feed/for-you
@@ -50,7 +45,7 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveUserId(req, res);
+    const userId = resolveUserId(req, res);
     if (!userId) return;
 
     const { page, limit } = req.query as unknown as PaginationQuery;
@@ -66,7 +61,7 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveUserId(req, res);
+    const userId = resolveUserId(req, res);
     if (!userId) return;
 
     const { page, limit } = req.query as unknown as PaginationQuery;
@@ -82,7 +77,7 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveUserId(req, res);
+    const userId = resolveUserId(req, res);
     if (!userId) return;
 
     const { page, limit } = req.query as unknown as PaginationQuery;
@@ -98,7 +93,7 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const userId = await resolveUserId(req, res);
+    const userId = resolveUserId(req, res);
     if (!userId) return;
 
     const { page, limit } = req.query as unknown as PaginationQuery;

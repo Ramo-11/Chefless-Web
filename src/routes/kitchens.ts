@@ -160,20 +160,15 @@ router.post(
   requireAuth,
   validate({ body: createKitchenSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { name, photo } = req.body as z.infer<typeof createKitchenSchema>;
-    const kitchen = await createKitchen(
-      currentUser._id.toString(),
-      name,
-      photo
-    );
+    const kitchen = await createKitchen(userId, name, photo);
 
     res.status(201).json({ kitchen });
   })
@@ -184,15 +179,14 @@ router.get(
   "/me",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const result = await getMyKitchen(currentUser._id.toString());
+    const result = await getMyKitchen(userId);
 
     if (!result) {
       res.status(200).json({ kitchen: null, members: [] });
@@ -209,16 +203,15 @@ router.patch(
   requireAuth,
   validate({ body: updateKitchenSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const updates = req.body as z.infer<typeof updateKitchenSchema>;
-    const kitchen = await updateKitchen(currentUser._id.toString(), updates);
+    const kitchen = await updateKitchen(userId, updates);
 
     res.status(200).json({ kitchen });
   })
@@ -230,19 +223,15 @@ router.patch(
   requireAuth,
   validate({ body: mealSlotOrderSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { mealSlotOrder } = req.body as z.infer<typeof mealSlotOrderSchema>;
-    const kitchen = await updateMealSlotOrder(
-      currentUser._id.toString(),
-      mealSlotOrder
-    );
+    const kitchen = await updateMealSlotOrder(userId, mealSlotOrder);
 
     res.status(200).json({ kitchen });
   })
@@ -254,19 +243,15 @@ router.patch(
   requireAuth,
   validate({ body: mealSlotTimesSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { mealSlotTimes } = req.body as z.infer<typeof mealSlotTimesSchema>;
-    const kitchen = await updateMealSlotTimes(
-      currentUser._id.toString(),
-      mealSlotTimes
-    );
+    const kitchen = await updateMealSlotTimes(userId, mealSlotTimes);
 
     res.status(200).json({ kitchen });
   })
@@ -277,15 +262,14 @@ router.delete(
   "/me",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    await deleteKitchen(currentUser._id.toString());
+    await deleteKitchen(userId);
 
     res.status(200).json({ success: true });
   })
@@ -299,20 +283,14 @@ router.post(
   strictLimiter,
   validate({ body: kitchenPhotoBodySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { image } = req.body as z.infer<typeof kitchenPhotoBodySchema>;
-    const kitchen = await uploadKitchenPhoto(
-      currentUser._id.toString(),
-      image
-    );
+    const kitchen = await uploadKitchenPhoto(userId, image);
 
     res.status(200).json({ kitchen });
   })
@@ -324,16 +302,13 @@ router.delete(
   "/me/photo",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const kitchen = await deleteKitchenPhoto(currentUser._id.toString());
+    const kitchen = await deleteKitchenPhoto(userId);
     res.status(200).json({ kitchen });
   })
 );
@@ -348,16 +323,15 @@ router.post(
   joinKitchenLimiter,
   validate({ body: joinKitchenSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { inviteCode } = req.body as z.infer<typeof joinKitchenSchema>;
-    const kitchen = await joinKitchen(currentUser._id.toString(), inviteCode);
+    const kitchen = await joinKitchen(userId, inviteCode);
 
     res.status(200).json({ kitchen });
   })
@@ -368,15 +342,14 @@ router.post(
   "/leave",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    await leaveKitchen(currentUser._id.toString());
+    await leaveKitchen(userId);
 
     res.status(200).json({ success: true });
   })
@@ -388,15 +361,14 @@ router.post(
   requireAuth,
   strictLimiter,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const result = await notifyFoodReady(currentUser._id.toString());
+    const result = await notifyFoodReady(userId);
 
     res.status(200).json(result);
   })
@@ -408,16 +380,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await removeMember(currentUser._id.toString(), id);
+    await removeMember(userId, id);
 
     res.status(200).json({ success: true });
   })
@@ -429,16 +400,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const kitchen = await transferLead(currentUser._id.toString(), id);
+    const kitchen = await transferLead(userId, id);
 
     res.status(200).json({ kitchen });
   })
@@ -450,19 +420,15 @@ router.patch(
   requireAuth,
   validate({ body: updatePermissionsSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const permissions = req.body as z.infer<typeof updatePermissionsSchema>;
-    const kitchen = await updatePermissions(
-      currentUser._id.toString(),
-      permissions
-    );
+    const kitchen = await updatePermissions(userId, permissions);
 
     res.status(200).json({ kitchen });
   })
@@ -473,15 +439,14 @@ router.post(
   "/regenerate-code",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const kitchen = await regenerateInviteCode(currentUser._id.toString());
+    const kitchen = await regenerateInviteCode(userId);
 
     res.status(200).json({ kitchen });
   })
@@ -545,19 +510,15 @@ router.post(
   strictLimiter,
   validate({ body: sendInviteSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { recipientUserId } = req.body as z.infer<typeof sendInviteSchema>;
-    const invite = await sendKitchenInvite(
-      currentUser._id.toString(),
-      recipientUserId
-    );
+    const invite = await sendKitchenInvite(userId, recipientUserId);
 
     res.status(201).json({ invite });
   })
@@ -568,17 +529,14 @@ router.get(
   "/invites",
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const invites = await listPendingInvitesForRecipient(
-      currentUser._id.toString()
-    );
+    const invites = await listPendingInvitesForRecipient(userId);
 
     res.status(200).json({ invites });
   })
@@ -590,16 +548,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const result = await acceptKitchenInvite(currentUser._id.toString(), id);
+    const result = await acceptKitchenInvite(userId, id);
 
     res.status(200).json(result);
   })
@@ -611,16 +568,15 @@ router.post(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const result = await declineKitchenInvite(currentUser._id.toString(), id);
+    const result = await declineKitchenInvite(userId, id);
 
     res.status(200).json(result);
   })
@@ -632,16 +588,15 @@ router.delete(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    await cancelKitchenInvite(currentUser._id.toString(), id);
+    await cancelKitchenInvite(userId, id);
 
     res.status(200).json({ success: true });
   })
@@ -841,12 +796,9 @@ router.put(
   requireAuth,
   validate({ body: hiddenDefaultsSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid })
-      .select("_id")
-      .lean();
+    const userId = req.user?.userId;
 
-    if (!currentUser) {
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -855,11 +807,9 @@ router.put(
       typeof hiddenDefaultsSchema
     >;
 
-    const result = await setHiddenDefaultSlots(
-      currentUser._id.toString(),
-      hiddenDefaultSlots,
-      { force }
-    );
+    const result = await setHiddenDefaultSlots(userId, hiddenDefaultSlots, {
+      force,
+    });
 
     if (result.kind === "needs_confirmation") {
       res.status(409).json({
@@ -895,9 +845,8 @@ router.get(
   requireAuth,
   validate({ query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -905,11 +854,7 @@ router.get(
     const { page, limit } = req.query as unknown as z.infer<
       typeof paginationSchema
     >;
-    const result = await getKitchenRatingsHistory(
-      currentUser._id.toString(),
-      page,
-      limit
-    );
+    const result = await getKitchenRatingsHistory(userId, page, limit);
 
     res.status(200).json(result);
   })
@@ -925,15 +870,14 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const view = await getPublicKitchen(currentUser._id.toString(), id);
+    const view = await getPublicKitchen(userId, id);
     res.status(200).json(view);
   })
 );
@@ -945,18 +889,14 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
     const { id } = req.params as z.infer<typeof objectIdParam>;
-    const entries = await getPublicKitchenSchedule(
-      currentUser._id.toString(),
-      id
-    );
+    const entries = await getPublicKitchenSchedule(userId, id);
     res.status(200).json({ entries });
   })
 );
@@ -968,9 +908,8 @@ router.get(
   requireAuth,
   validate({ params: objectIdParam, query: paginationSchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const firebaseUid = req.user!.uid;
-    const currentUser = await User.findOne({ firebaseUid }).select("_id").lean();
-    if (!currentUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
       res.status(404).json({ error: "User not found" });
       return;
     }
@@ -979,12 +918,7 @@ router.get(
     const { page, limit } = req.query as unknown as z.infer<
       typeof paginationSchema
     >;
-    const result = await getPublicKitchenRecipes(
-      currentUser._id.toString(),
-      id,
-      page,
-      limit
-    );
+    const result = await getPublicKitchenRecipes(userId, id, page, limit);
 
     res.status(200).json({
       recipes: result.data,

@@ -6,6 +6,7 @@ import WebhookEvent from "../models/WebhookEvent";
 import Transaction, { buildTransactionInput } from "../models/Transaction";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
+import { sendPremiumPurchaseAlert } from "../services/purchase-alert-service";
 
 const router = Router();
 
@@ -144,7 +145,7 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
     expiration_at_ms: expirationAtMs,
   } = event;
 
-  // Idempotency — record the event first. If RevenueCat missing an event id
+  // Idempotency — claim the event first. If RevenueCat is missing an event id
   // (unexpected), synthesize a stable hash from the payload so retries of the
   // same body still dedupe.
   const idempotencyKey =
@@ -154,6 +155,14 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
       .update(JSON.stringify(payload))
       .digest("hex");
 
+  // Claim-then-confirm: the row is created BEFORE processing and stamped
+  // `processedAt` only AFTER the entitlement mutation succeeds. A duplicate of
+  // a confirmed event short-circuits; a duplicate of a claimed-but-unconfirmed
+  // event is a retry of an attempt that failed mid-flight (e.g. a transient DB
+  // error) and falls through to reprocess. Entitlement updates and the
+  // transaction ledger are idempotent, so a rare double-run is harmless,
+  // whereas dropping a retried event would strand a paying user un-upgraded
+  // (or leave a cancelled one premium) permanently.
   try {
     await WebhookEvent.create({
       eventId: idempotencyKey,
@@ -161,20 +170,38 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
       payload,
     });
   } catch (err) {
-    if (isDuplicateKeyError(err)) {
-      logger.info(
-        { eventId: idempotencyKey, type },
-        "Duplicate RevenueCat webhook, skipping"
+    if (!isDuplicateKeyError(err)) {
+      logger.error(
+        { err, eventId: idempotencyKey },
+        "Failed to record webhook event"
       );
-      res.status(200).json({ received: true, duplicate: true });
+      res.status(500).json({ error: "Internal server error" });
       return;
     }
-    logger.error(
-      { err, eventId: idempotencyKey },
-      "Failed to record webhook event"
+    try {
+      const prior = await WebhookEvent.findOne({ eventId: idempotencyKey })
+        .select("processedAt")
+        .lean();
+      if (prior?.processedAt) {
+        logger.info(
+          { eventId: idempotencyKey, type },
+          "Duplicate RevenueCat webhook, skipping"
+        );
+        res.status(200).json({ received: true, duplicate: true });
+        return;
+      }
+    } catch (lookupErr) {
+      logger.error(
+        { err: lookupErr, eventId: idempotencyKey },
+        "Failed to check webhook event status"
+      );
+      res.status(500).json({ error: "Internal server error" });
+      return;
+    }
+    logger.warn(
+      { eventId: idempotencyKey, type },
+      "Reprocessing RevenueCat webhook whose prior attempt did not complete"
     );
-    res.status(500).json({ error: "Internal server error" });
-    return;
   }
 
   // Record the financial ledger row now that this event is confirmed new.
@@ -197,7 +224,7 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
         // Load existing premiumExpiresAt to guard against out-of-order delivery
         // rolling back a longer subscription window.
         const existing = await User.findOne({ firebaseUid: appUserId })
-          .select("premiumExpiresAt")
+          .select("premiumExpiresAt email fullName")
           .lean();
 
         if (!existing) {
@@ -239,6 +266,24 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
             $unset: { premiumGrantedBy: 1, premiumGrantedAt: 1 },
           }
         );
+
+        // Owner notification on genuinely new purchases only: renewals would
+        // email every month, and sandbox events would email on every test
+        // purchase. Missing `environment` is treated as production so a real
+        // purchase is never silently skipped. Fire-and-forget; the alert
+        // service never throws.
+        if (type === "INITIAL_PURCHASE" && event.environment !== "SANDBOX") {
+          void sendPremiumPurchaseAlert({
+            email: existing.email,
+            fullName: existing.fullName,
+            plan,
+            productId,
+            price: event.price,
+            currency: event.currency,
+            store: event.store,
+            expiresAt: incomingExpiry ?? null,
+          });
+        }
         break;
       }
 
@@ -267,6 +312,21 @@ router.post("/revenuecat", async (req: Request, res: Response) => {
         // Acknowledge unknown event types without processing.
         logger.info({ type }, "Ignoring unhandled RevenueCat event type");
         break;
+    }
+
+    // Confirm the claim. If this write fails the entitlement is already
+    // applied, so still acknowledge; a later retry would reprocess an
+    // idempotent mutation and confirm then.
+    try {
+      await WebhookEvent.updateOne(
+        { eventId: idempotencyKey },
+        { $set: { processedAt: new Date() } }
+      );
+    } catch (err) {
+      logger.error(
+        { err, eventId: idempotencyKey },
+        "Failed to mark webhook event processed"
+      );
     }
 
     res.status(200).json({ received: true });
