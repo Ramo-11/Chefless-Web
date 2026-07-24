@@ -73,10 +73,18 @@ app.use(helmet({
 // inline handlers, so 'unsafe-inline' stays in script-src/style-src — a strict
 // nonce-based policy is out of scope and would break the panel. The allow-list
 // below is derived from the external origins actually referenced across
-// src/views/*: Font Awesome CSS + webfonts from cdnjs, Chart.js from jsDelivr,
-// and Cloudinary image URLs stored in the database. Everything else is locked
-// to 'self' so that even an injection that survives output escaping cannot
-// exfiltrate data to an attacker-controlled origin.
+// src/views/*: Chart.js from jsDelivr, and recipe/profile image URLs stored in
+// the database. Everything else is locked to 'self' so that even an injection
+// that survives output escaping cannot exfiltrate data to an attacker-
+// controlled origin. (The panel is icon-free and no longer loads Font Awesome,
+// so cdnjs is gone from font-src/style-src.)
+//
+// img-src has to accept any https origin: recipe photos are not all on
+// Cloudinary. Imported and seeded recipes keep the source image URL
+// (themealdb.com, images.pexels.com, and whatever a future importer pulls
+// from), so pinning the list to res.cloudinary.com silently broke every one
+// of those thumbnails in the moderation tables. Images cannot execute, and
+// script-src/connect-src stay locked down, so this is the narrow relaxation.
 const adminCsp =
   "default-src 'self'; " +
   "base-uri 'self'; " +
@@ -84,9 +92,9 @@ const adminCsp =
   "frame-ancestors 'self'; " +
   "form-action 'self'; " +
   "connect-src 'self'; " +
-  "img-src 'self' https://res.cloudinary.com data:; " +
-  "font-src 'self' https://cdnjs.cloudflare.com; " +
-  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+  "img-src 'self' https: data:; " +
+  "font-src 'self'; " +
+  "style-src 'self' 'unsafe-inline'; " +
   "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net";
 
 const adminCspMiddleware: express.RequestHandler = (_req, res, next) => {
@@ -109,7 +117,13 @@ const corsOriginOption: CorsOptions["origin"] = isProd
 app.use(cors({
   origin: corsOriginOption,
   methods: ["GET", "POST", "PATCH", "DELETE"],
-  allowedHeaders: ["Authorization", "Content-Type", "X-CSRF-Token"],
+  allowedHeaders: [
+    "Authorization",
+    "Content-Type",
+    "X-CSRF-Token",
+    "X-Client-Platform",
+    "X-Idempotency-Key",
+  ],
   credentials: true,
 }));
 

@@ -9,10 +9,7 @@
 <!-- Toolbar -->
 <div class="toolbar">
   <form action="/admin/kitchens" method="GET" class="toolbar-search">
-    <div class="input-with-icon">
-      <i class="fas fa-search"></i>
-      <input type="text" name="search" value="<%= search %>" placeholder="Search by kitchen name...">
-    </div>
+    <input type="text" name="search" value="<%= search %>" placeholder="Search by kitchen name...">
     <button type="submit" class="btn btn-primary btn-sm">Search</button>
   </form>
 </div>
@@ -48,16 +45,14 @@
           <td><code><%= kitchen.inviteCode %></code></td>
           <td class="text-muted"><%= new Date(kitchen.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></td>
           <td>
-            <div class="action-buttons">
-              <button class="btn btn-sm btn-secondary" onclick="viewKitchen('<%= kitchen._id %>')" aria-label="View kitchen details">
-                <i class="fas fa-eye"></i>
-              </button>
-              <button class="btn btn-sm btn-secondary" onclick="editKitchen('<%= kitchen._id %>')" aria-label="Edit kitchen">
-                <i class="fas fa-pencil"></i>
-              </button>
-              <button class="btn btn-sm btn-danger-outline" onclick="confirmDeleteKitchen('<%= kitchen._id %>', '<%= kitchen.name.replace(/'/g, "\\'") %>')" aria-label="Delete kitchen">
-                <i class="fas fa-trash"></i>
-              </button>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for <%= kitchen.name %>">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem" onclick="viewKitchen('<%= kitchen._id %>')">View details</button>
+                <button type="button" class="row-menu-item" role="menuitem" onclick="editKitchen('<%= kitchen._id %>')">Edit</button>
+                <div class="row-menu-divider"></div>
+                <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" onclick="confirmDeleteKitchen('<%= kitchen._id %>', '<%= kitchen.name.replace(/'/g, "\\'") %>')">Delete kitchen</button>
+              </div>
             </div>
           </td>
         </tr>
@@ -65,7 +60,6 @@
         <% if (kitchens.length === 0) { %>
         <tr>
           <td colspan="6" class="empty-state">
-            <i class="fas fa-search"></i>
             <span>No kitchens found</span>
           </td>
         </tr>
@@ -88,7 +82,7 @@
       <button class="modal-close" onclick="closeModal('kitchen-detail-modal')" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body" id="kitchen-detail-body">
-      <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="loading-spinner">Loading...</div>
     </div>
   </div>
 </div>
@@ -141,7 +135,7 @@
 
   function viewKitchen(id) {
     openModal('kitchen-detail-modal');
-    document.getElementById('kitchen-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    document.getElementById('kitchen-detail-body').innerHTML = '<div class="loading-spinner">Loading...</div>';
     Promise.all([
       adminFetch('/admin/api/kitchens/' + id),
       adminFetch('/admin/api/kitchens/' + id + '/suggestions').catch(() => ({ suggestions: [] })),
@@ -183,10 +177,16 @@
                           <td class="text-muted">${esc(m.email)}</td>
                           <td>${isLead ? '<span class="badge badge-info">Lead</span>' : '<span class="badge badge-default">Member</span>'}</td>
                           <td>
-                            <div class="action-buttons">
-                              ${!isLead ? `<button class="btn btn-sm btn-danger-outline" onclick="removeMember('${esc(k._id)}', '${esc(mIdStr)}', '${esc(m.fullName)}')" aria-label="Remove member"><i class="fas fa-user-minus"></i></button>` : ''}
-                              ${!isLead ? `<button class="btn btn-sm btn-secondary" onclick="transferLead('${esc(k._id)}', '${esc(mIdStr)}', '${esc(m.fullName)}')" aria-label="Transfer lead"><i class="fas fa-crown"></i></button>` : ''}
-                            </div>
+                            ${isLead ? '<span class="text-muted text-sm">Kitchen lead</span>' : `
+                              <div class="row-menu">
+                                <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for ${esc(m.fullName)}">...</button>
+                                <div class="row-menu-list" role="menu">
+                                  <button type="button" class="row-menu-item" role="menuitem" onclick="transferLead('${esc(k._id)}', '${esc(mIdStr)}', '${esc(m.fullName)}')">Make kitchen lead</button>
+                                  <div class="row-menu-divider"></div>
+                                  <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" onclick="removeMember('${esc(k._id)}', '${esc(mIdStr)}', '${esc(m.fullName)}')">Remove from kitchen</button>
+                                </div>
+                              </div>
+                            `}
                           </td>
                         </tr>
                       `;
@@ -261,7 +261,7 @@
               <div style="display: flex; gap: 12px; align-items: flex-start;">
                 <img src="${esc(k.photo)}" alt="Kitchen photo" style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color, #e5e7eb);">
                 <button class="btn btn-sm btn-danger-outline" onclick="removeKitchenPhoto('${esc(k._id)}')" aria-label="Remove kitchen photo">
-                  <i class="fas fa-trash"></i> Remove photo
+                  Remove photo
                 </button>
               </div>
              </div>`

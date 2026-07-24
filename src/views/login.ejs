@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login — Chefless Admin</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <title>Login | Chefless Admin</title>
   <link rel="stylesheet" href="/admin/css/admin.css">
 </head>
 <body class="login-body">
@@ -18,7 +17,6 @@
 
       <% if (error) { %>
       <div class="alert alert-error">
-        <i class="fas fa-exclamation-circle"></i>
         <span><%= error %></span>
       </div>
       <% } %>
@@ -33,11 +31,9 @@
 
         <div class="form-group">
           <label for="password">Password</label>
-          <div class="input-with-icon">
+          <div class="input-with-trailing-action">
             <input type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
-            <button type="button" class="toggle-password" id="toggle-password" aria-label="Toggle password visibility">
-              <i class="fas fa-eye"></i>
-            </button>
+            <button type="button" class="toggle-password" id="toggle-password" aria-label="Show password">Show</button>
           </div>
         </div>
 
@@ -51,14 +47,10 @@
   <script>
     document.getElementById('toggle-password')?.addEventListener('click', function() {
       const input = document.getElementById('password');
-      const icon = this.querySelector('i');
-      if (input.type === 'password') {
-        input.type = 'text';
-        icon.classList.replace('fa-eye', 'fa-eye-slash');
-      } else {
-        input.type = 'password';
-        icon.classList.replace('fa-eye-slash', 'fa-eye');
-      }
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      this.textContent = showing ? 'Show' : 'Hide';
+      this.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
     });
   </script>
 </body>

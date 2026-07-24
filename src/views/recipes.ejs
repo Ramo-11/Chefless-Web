@@ -9,29 +9,26 @@
 <!-- Filters -->
 <div class="toolbar">
   <form action="/admin/recipes" method="GET" class="toolbar-search">
-    <div class="input-with-icon">
-      <i class="fas fa-search"></i>
-      <input type="text" name="search" value="<%= search %>" placeholder="Search recipes by title...">
-    </div>
+    <input type="text" name="search" value="<%= search %>" placeholder="Search recipes by title...">
     <input type="hidden" name="filter" value="<%= filter %>">
     <button type="submit" class="btn btn-primary btn-sm">Search</button>
   </form>
 
   <div class="toolbar-filters">
     <a href="/admin/recipes?filter=reported&search=<%= search %>" class="filter-chip <%= filter === 'reported' ? 'active' : '' %>">
-      <i class="fas fa-flag"></i> Reported
+      Reported
     </a>
     <a href="/admin/recipes?filter=hidden&search=<%= search %>" class="filter-chip <%= filter === 'hidden' ? 'active' : '' %>">
-      <i class="fas fa-eye-slash"></i> Hidden
+      Hidden
     </a>
     <a href="/admin/recipes?filter=featured&search=<%= search %>" class="filter-chip <%= filter === 'featured' ? 'active' : '' %>">
-      <i class="fas fa-star"></i> Featured
+      Featured
     </a>
     <a href="/admin/recipes?filter=all&search=<%= search %>" class="filter-chip <%= filter === 'all' ? 'active' : '' %>">
       All
     </a>
     <a href="/admin/recipes?filter=seed&search=<%= search %>" class="filter-chip <%= filter === 'seed' ? 'active' : '' %>">
-      <i class="fas fa-seedling"></i> Seed
+      Seed
     </a>
   </div>
 </div>
@@ -65,7 +62,7 @@
               <% if (recipe.photos && recipe.photos.length > 0) { %>
                 <img src="<%= recipe.photos[0] %>" alt="" class="recipe-thumb">
               <% } else { %>
-                <div class="recipe-thumb recipe-thumb-placeholder"><i class="fas fa-image"></i></div>
+                <div class="recipe-thumb recipe-thumb-placeholder" title="No photo"></div>
               <% } %>
               <span class="recipe-title"><%= recipe.title %></span>
             </div>
@@ -80,18 +77,18 @@
           </td>
           <td>
             <span class="text-muted">
-              <i class="fas fa-heart"></i> <%= recipe.likesCount %>
+              <%= recipe.likesCount %> likes
               &nbsp;
-              <i class="fas fa-code-branch"></i> <%= recipe.forksCount %>
+              <%= recipe.forksCount %> forks
             </span>
           </td>
           <td>
             <div class="badge-group">
               <% if (recipe.isSeed) { %>
-                <span class="badge badge-default"><i class="fas fa-seedling"></i> Seed</span>
+                <span class="badge badge-default">Seed</span>
               <% } %>
               <% if (recipe.isFeatured) { %>
-                <span class="badge badge-warning"><i class="fas fa-star"></i> Featured</span>
+                <span class="badge badge-warning">Featured</span>
               <% } %>
               <% if (recipe.isHidden) { %>
                 <span class="badge badge-warning">Hidden</span>
@@ -106,28 +103,20 @@
           </td>
           <td class="text-muted"><%= new Date(recipe.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %></td>
           <td>
-            <div class="action-buttons">
-              <button class="btn btn-sm btn-secondary" onclick="viewRecipe('<%= recipe._id %>')" aria-label="View recipe">
-                <i class="fas fa-eye"></i>
-              </button>
-              <button class="btn btn-sm btn-secondary" onclick="editRecipe('<%= recipe._id %>')" aria-label="Edit recipe">
-                <i class="fas fa-pencil-alt"></i>
-              </button>
-              <button class="btn btn-sm <%= recipe.isHidden ? 'btn-success-outline' : 'btn-warning-outline' %>"
-                      onclick="toggleHide('<%= recipe._id %>')"
-                      aria-label="<%= recipe.isHidden ? 'Show' : 'Hide' %> recipe">
-                <i class="fas fa-<%= recipe.isHidden ? 'eye' : 'eye-slash' %>"></i>
-              </button>
-              <button class="btn btn-sm btn-warning-outline"
-                      onclick="toggleFeature('<%= recipe._id %>')"
-                      aria-label="<%= recipe.isFeatured ? 'Unfeature' : 'Feature' %> recipe"
-                      title="<%= (recipe.isPrivate || recipe.isHidden) && !recipe.isFeatured ? 'Make the recipe public and visible before featuring' : (recipe.isFeatured ? 'Unfeature recipe' : 'Feature recipe on home') %>"
-                      <%= (recipe.isPrivate || recipe.isHidden) && !recipe.isFeatured ? 'disabled' : '' %>>
-                <i class="<%= recipe.isFeatured ? 'fas' : 'far' %> fa-star"></i>
-              </button>
-              <button class="btn btn-sm btn-danger-outline" data-id="<%= recipe._id %>" data-title="<%= recipe.title %>" onclick="deleteRecipe(this.dataset.id, this.dataset.title)" aria-label="Delete recipe">
-                <i class="fas fa-trash"></i>
-              </button>
+            <% var featureBlocked = (recipe.isPrivate || recipe.isHidden) && !recipe.isFeatured; %>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for <%= recipe.title %>">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem" onclick="viewRecipe('<%= recipe._id %>')">View</button>
+                <button type="button" class="row-menu-item" role="menuitem" onclick="editRecipe('<%= recipe._id %>')">Edit</button>
+                <button type="button" class="row-menu-item" role="menuitem" onclick="toggleHide('<%= recipe._id %>')"><%= recipe.isHidden ? 'Show recipe' : 'Hide recipe' %></button>
+                <button type="button" class="row-menu-item" role="menuitem" onclick="toggleFeature('<%= recipe._id %>')" <%= featureBlocked ? 'disabled' : '' %>><%= recipe.isFeatured ? 'Unfeature' : 'Feature on home' %></button>
+                <% if (featureBlocked) { %>
+                  <p class="row-menu-note">Make the recipe public and visible before featuring.</p>
+                <% } %>
+                <div class="row-menu-divider"></div>
+                <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" data-id="<%= recipe._id %>" data-title="<%= recipe.title %>" onclick="deleteRecipe(this.dataset.id, this.dataset.title)">Delete</button>
+              </div>
             </div>
           </td>
         </tr>
@@ -135,7 +124,6 @@
         <% if (recipes.length === 0) { %>
         <tr>
           <td colspan="7" class="empty-state">
-            <i class="fas fa-check-circle"></i>
             <span>No recipes match this filter</span>
           </td>
         </tr>
@@ -157,7 +145,7 @@
       <button class="modal-close" onclick="closeModal('recipe-detail-modal')" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body" id="recipe-detail-body">
-      <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="loading-spinner">Loading...</div>
     </div>
   </div>
 </div>
@@ -231,7 +219,7 @@
 
   function viewRecipe(id) {
     openModal('recipe-detail-modal');
-    document.getElementById('recipe-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    document.getElementById('recipe-detail-body').innerHTML = '<div class="loading-spinner">Loading...</div>';
     adminFetch('/admin/api/recipes/' + id)
       .then(data => {
         const r = data.recipe;

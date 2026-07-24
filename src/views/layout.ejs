@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="<%= csrfToken %>">
-  <title><%= typeof pageTitle !== 'undefined' ? pageTitle + ' — ' : '' %>Chefless Admin</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <title><%= typeof pageTitle !== 'undefined' ? pageTitle + ' | ' : '' %>Chefless Admin</title>
   <link rel="stylesheet" href="/admin/css/admin.css">
 </head>
 <body>
@@ -17,81 +16,63 @@
           <img src="/admin/images/logo.png" alt="Chefless" style="width:32px;height:32px;object-fit:contain;border-radius:8px;">
           <span>Chefless</span>
         </div>
-        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
-          <i class="fas fa-bars"></i>
-        </button>
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">Menu</button>
       </div>
 
       <nav class="sidebar-nav">
         <a href="/admin" class="nav-item <%= page === 'dashboard' ? 'active' : '' %>">
-          <i class="fas fa-chart-line"></i>
           <span>Dashboard</span>
         </a>
         <a href="/admin/analytics" class="nav-item <%= page === 'analytics' ? 'active' : '' %>">
-          <i class="fas fa-chart-bar"></i>
           <span>Analytics</span>
         </a>
         <a href="/admin/revenue" class="nav-item <%= page === 'revenue' ? 'active' : '' %>">
-          <i class="fas fa-sack-dollar"></i>
           <span>Revenue</span>
         </a>
         <a href="/admin/users" class="nav-item <%= page === 'users' ? 'active' : '' %>">
-          <i class="fas fa-users"></i>
           <span>Users</span>
         </a>
         <a href="/admin/recipes" class="nav-item <%= page === 'recipes' ? 'active' : '' %>">
-          <i class="fas fa-book-open"></i>
           <span>Recipes</span>
         </a>
         <a href="/admin/moderated-posts" class="nav-item <%= page === 'moderated-posts' ? 'active' : '' %>">
-          <i class="fas fa-user-slash"></i>
           <span>Moderated Posts</span>
         </a>
         <a href="/admin/kitchens" class="nav-item <%= page === 'kitchens' ? 'active' : '' %>">
-          <i class="fas fa-house-user"></i>
           <span>Kitchens</span>
         </a>
         <a href="/admin/reports" class="nav-item <%= page === 'reports' ? 'active' : '' %>">
-          <i class="fas fa-flag"></i>
           <span>Reports</span>
           <% if (typeof pendingCount !== 'undefined' && pendingCount > 0) { %>
             <span class="badge badge-danger"><%= pendingCount %></span>
           <% } %>
         </a>
         <a href="/admin/feedback" class="nav-item <%= page === 'feedback' ? 'active' : '' %>">
-          <i class="fas fa-comment-dots"></i>
           <span>Feedback</span>
         </a>
         <a href="/admin/early-access" class="nav-item <%= page === 'early-access' ? 'active' : '' %>">
-          <i class="fas fa-envelope-open-text"></i>
           <span>Early Access</span>
         </a>
         <a href="/admin/errors" class="nav-item <%= page === 'errors' ? 'active' : '' %>">
-          <i class="fas fa-bug"></i>
           <span>Crashes</span>
           <% if (typeof openCrashesCount !== 'undefined' && openCrashesCount > 0) { %>
             <span class="badge badge-danger"><%= openCrashesCount %></span>
           <% } %>
         </a>
         <a href="/admin/labels" class="nav-item <%= page === 'labels' ? 'active' : '' %>">
-          <i class="fas fa-tags"></i>
           <span>Labels</span>
         </a>
         <a href="/admin/seasonal" class="nav-item <%= page === 'seasonal' ? 'active' : '' %>">
-          <i class="fas fa-snowflake"></i>
           <span>Seasonal</span>
         </a>
         <a href="/admin/app-config" class="nav-item <%= page === 'app-config' ? 'active' : '' %>">
-          <i class="fas fa-toggle-on"></i>
           <span>App Settings</span>
         </a>
         <a href="/admin/seed-data" class="nav-item <%= page === 'seed-data' ? 'active' : '' %>">
-          <i class="fas fa-seedling"></i>
           <span>Seed Data</span>
         </a>
         <% if (adminRole === 'super_admin') { %>
           <a href="/admin/admins" class="nav-item <%= page === 'admins' ? 'active' : '' %>">
-            <i class="fas fa-user-shield"></i>
             <span>Admins</span>
           </a>
         <% } %>
@@ -99,9 +80,7 @@
 
       <div class="sidebar-footer">
         <div class="admin-info">
-          <div class="admin-avatar">
-            <i class="fas fa-user-shield"></i>
-          </div>
+          <div class="admin-avatar"><%= adminName.charAt(0).toUpperCase() %></div>
           <div class="admin-details">
             <span class="admin-name"><%= adminName %></span>
             <span class="admin-role"><%= adminRole === 'super_admin' ? 'Super Admin' : 'Admin' %></span>
@@ -109,9 +88,7 @@
         </div>
         <form action="/admin/logout" method="POST" class="logout-form">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <button type="submit" class="btn-logout" aria-label="Logout">
-            <i class="fas fa-sign-out-alt"></i>
-          </button>
+          <button type="submit" class="btn-logout">Log out</button>
         </form>
       </div>
     </aside>
@@ -119,13 +96,11 @@
     <!-- Main Content -->
     <main class="main-content">
       <header class="top-bar">
-        <button class="mobile-toggle" id="mobile-toggle" aria-label="Toggle menu">
-          <i class="fas fa-bars"></i>
-        </button>
+        <button class="mobile-toggle" id="mobile-toggle" aria-label="Toggle menu">Menu</button>
         <div class="breadcrumb">
           <% if (page !== 'dashboard') { %>
             <a href="/admin">Dashboard</a>
-            <i class="fas fa-chevron-right"></i>
+            <span class="breadcrumb-sep" aria-hidden="true">/</span>
             <span><%= page.charAt(0).toUpperCase() + page.slice(1) %></span>
           <% } else { %>
             <span>Dashboard</span>
@@ -141,7 +116,6 @@
 
   <!-- Notification Toast -->
   <div class="toast" id="toast">
-    <i class="toast-icon"></i>
     <span class="toast-message"></span>
   </div>
 

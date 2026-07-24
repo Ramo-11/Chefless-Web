@@ -67,7 +67,7 @@
     </div>
 
     <button class="btn btn-primary" onclick="saveAppConfig()" style="margin-top: 1rem;">
-      <i class="fas fa-save"></i> Save settings
+      Save settings
     </button>
 
     <p class="text-muted" style="margin-top: 1.5rem; font-size: 0.75rem;">
@@ -94,7 +94,7 @@
         <input type="email" id="test-user-email" placeholder="someone@example.com">
       </div>
       <button class="btn btn-primary" onclick="addTestUser()" style="white-space: nowrap;">
-        <i class="fas fa-plus"></i> Add tester
+        Add tester
       </button>
     </div>
 
@@ -118,9 +118,8 @@
                     <button
                       class="btn btn-sm btn-danger-outline"
                       onclick="removeTestUser('<%= u.id %>', '<%= u.fullName.replace(/'/g, "\\'") %>')"
-                      aria-label="Remove from test list"
                     >
-                      <i class="fas fa-trash"></i>
+                      Remove
                     </button>
                   </td>
                 </tr>

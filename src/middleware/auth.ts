@@ -25,6 +25,22 @@ if (!admin.apps.length) {
   });
 }
 
+type ClientPlatform = "ios" | "android" | "web";
+
+/**
+ * Reads the `X-Client-Platform` header the mobile client attaches to every
+ * request. Platform used to be captured only when an FCM token was registered,
+ * which meant anyone who declined push notifications never reported a device
+ * at all and the admin Users table showed nothing for them.
+ */
+function readClientPlatform(req: Request): ClientPlatform | null {
+  const raw = req.headers["x-client-platform"];
+  const value = (Array.isArray(raw) ? raw[0] : raw)?.toLowerCase();
+  return value === "ios" || value === "android" || value === "web"
+    ? value
+    : null;
+}
+
 export async function requireAuth(
   req: Request,
   res: Response,
@@ -42,11 +58,11 @@ export async function requireAuth(
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
 
-    // One lookup serves both the ban check and the Mongo user id that
-    // downstream handlers need, so each request hits the users collection
-    // once instead of twice.
+    // One lookup serves the ban check, the Mongo user id that downstream
+    // handlers need, and the stored platform, so each request hits the users
+    // collection once instead of three times.
     const user = await User.findOne({ firebaseUid: decodedToken.uid })
-      .select("isBanned")
+      .select("isBanned lastKnownPlatform")
       .lean();
 
     if (user?.isBanned) {
@@ -61,6 +77,21 @@ export async function requireAuth(
       email: decodedToken.email,
       userId: user?._id?.toString(),
     };
+
+    // Persist the reporting device, but only when it actually changed, so the
+    // common case stays a pure read. Fire-and-forget: a failed write must never
+    // fail the request it piggybacks on.
+    const platform = readClientPlatform(req);
+    if (user && platform && user.lastKnownPlatform !== platform) {
+      User.updateOne(
+        { _id: user._id },
+        { $set: { lastKnownPlatform: platform } }
+      )
+        .exec()
+        .catch((err: unknown) => {
+          logger.warn({ err }, "Failed to record lastKnownPlatform");
+        });
+    }
 
     next();
   } catch {

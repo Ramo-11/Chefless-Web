@@ -43,14 +43,93 @@ document.addEventListener('keydown', function (e) {
   }
 });
 
+// ── Row Action Menus ────────────────────────────────────────
+// Every table row exposes its actions through a "..." trigger that opens a
+// list of worded actions. The list is placed with position: fixed because
+// .table-responsive scrolls horizontally and would otherwise clip it.
+(function () {
+  var openList = null;
+
+  function closeRowMenu() {
+    if (!openList) return;
+    openList.classList.remove('open');
+    var trigger = openList.parentElement.querySelector('.row-menu-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    openList = null;
+  }
+
+  function placeRowMenu(trigger, list) {
+    var margin = 8;
+    var rect = trigger.getBoundingClientRect();
+
+    // Measure off-screen before deciding which way the menu should open.
+    list.style.top = '-9999px';
+    list.style.left = '-9999px';
+    list.classList.add('open');
+
+    var width = list.offsetWidth;
+    var height = list.offsetHeight;
+
+    var left = rect.right - width;
+    if (left < margin) left = margin;
+    if (left + width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - margin - width);
+    }
+
+    var top = rect.bottom + 4;
+    if (top + height > window.innerHeight - margin) {
+      var above = rect.top - height - 4;
+      top = above >= margin ? above : Math.max(margin, window.innerHeight - margin - height);
+    }
+
+    list.style.left = Math.round(left) + 'px';
+    list.style.top = Math.round(top) + 'px';
+  }
+
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest ? e.target.closest('.row-menu-trigger') : null;
+
+    if (trigger) {
+      e.preventDefault();
+      e.stopPropagation();
+      var list = trigger.parentElement.querySelector('.row-menu-list');
+      if (!list) return;
+      var wasOpen = list === openList;
+      closeRowMenu();
+      if (wasOpen) return;
+      placeRowMenu(trigger, list);
+      trigger.setAttribute('aria-expanded', 'true');
+      openList = list;
+      var first = list.querySelector('.row-menu-item:not(:disabled)');
+      if (first) first.focus();
+      return;
+    }
+
+    // Any click elsewhere (including on a menu item, which runs its own
+    // handler first) dismisses the open menu.
+    closeRowMenu();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && openList) {
+      var trigger = openList.parentElement.querySelector('.row-menu-trigger');
+      closeRowMenu();
+      if (trigger) trigger.focus();
+    }
+  });
+
+  window.addEventListener('resize', closeRowMenu);
+  window.addEventListener('scroll', closeRowMenu, true);
+})();
+
 // ── Toast ───────────────────────────────────────────────────
 function showToast(message, type) {
   var toast = document.getElementById('toast');
   if (!toast) return;
 
+  // Success vs error reads from the coloured left border on .toast-success /
+  // .toast-error; there is no status glyph.
   toast.className = 'toast toast-' + (type || 'success') + ' show';
-  toast.querySelector('.toast-icon').className =
-    'toast-icon fas fa-' + (type === 'error' ? 'exclamation-circle' : 'check-circle');
   toast.querySelector('.toast-message').textContent = message;
 
   setTimeout(function () {

@@ -1,21 +1,24 @@
 /**
  * Backfill `lastKnownPlatform` on existing users from data we already have.
  *
- * Why: `lastKnownPlatform` is captured from the Flutter client on FCM-token
- * registration, but only for app launches that happen after the field shipped.
- * Until everyone re-opens the app, the admin Users table shows "Unknown" for
- * historical accounts. We can do better by harvesting platform from records
- * already attributed to each user.
+ * Why: `lastKnownPlatform` is captured from the Flutter client (the
+ * `X-Client-Platform` header on every authenticated request), but only for app
+ * launches that happen after that shipped. Until everyone re-opens the app on
+ * a current build, the admin Users table shows "Unknown" for historical
+ * accounts. We can do better by harvesting platform from records already
+ * attributed to each user.
  *
  * Sources (most authoritative first):
  *   1. ClientError.platform / userId (lastSeenAt is the newest signal)
  *   2. Feedback.platform / userId (createdAt)
+ *   3. Transaction.store / appUserId (purchasedAt) — RevenueCat records the
+ *      purchasing store, which only ever means the App Store or Google Play.
  *
- * Both collections store `ios | android | web` per record. We pick the most
- * recent record per user and copy its platform onto User.lastKnownPlatform —
- * but only when the field is currently unset, so a real FCM registration
- * (which is more authoritative — the user literally opened the app on that
- * device) is never overwritten.
+ * The first two store `ios | android | web` per record; the third is mapped
+ * from RevenueCat's store name. We pick the most recent record per user and
+ * copy its platform onto User.lastKnownPlatform — but only when the field is
+ * currently unset, so a live client report (the user literally opened the app
+ * on that device) is never overwritten.
  *
  * Idempotent: safe to re-run. Users who already have lastKnownPlatform set
  * are skipped. Users with no signal in either collection stay unknown.
@@ -28,6 +31,7 @@ import mongoose from "mongoose";
 import User from "../models/User";
 import ClientError from "../models/ClientError";
 import Feedback from "../models/Feedback";
+import Transaction from "../models/Transaction";
 import { env } from "../lib/env";
 
 type Platform = "ios" | "android" | "web";
@@ -39,7 +43,7 @@ async function main(): Promise<void> {
   const users = await User.find({
     lastKnownPlatform: { $exists: false },
   })
-    .select("_id")
+    .select("_id firebaseUid")
     .lean();
   console.log(`Found ${users.length} users with no platform recorded.`);
 
@@ -49,7 +53,7 @@ async function main(): Promise<void> {
   const tally: Record<Platform, number> = { ios: 0, android: 0, web: 0 };
 
   for (const u of users) {
-    const platform = await resolvePlatform(u._id);
+    const platform = await resolvePlatform(u._id, u.firebaseUid);
     if (platform) {
       await User.updateOne(
         { _id: u._id },
@@ -78,8 +82,17 @@ async function main(): Promise<void> {
   await mongoose.disconnect();
 }
 
+/** Maps a RevenueCat `store` value onto the platform it can only have been. */
+function platformFromStore(store: string | undefined): Platform | null {
+  const s = (store ?? "").toUpperCase();
+  if (s === "APP_STORE" || s === "MAC_APP_STORE") return "ios";
+  if (s === "PLAY_STORE" || s === "AMAZON") return "android";
+  return null;
+}
+
 async function resolvePlatform(
-  userId: mongoose.Types.ObjectId
+  userId: mongoose.Types.ObjectId,
+  firebaseUid: string | undefined
 ): Promise<Platform | null> {
   const latestError = await ClientError.findOne({ userId })
     .sort({ lastSeenAt: -1 })
@@ -94,17 +107,39 @@ async function resolvePlatform(
     .select("platform createdAt")
     .lean();
 
-  const errorAt = latestError?.lastSeenAt?.getTime() ?? 0;
-  const feedbackAt = latestFeedback?.createdAt?.getTime() ?? 0;
+  const latestTransaction = firebaseUid
+    ? await Transaction.findOne({ appUserId: firebaseUid })
+        .sort({ purchasedAt: -1 })
+        .select("store purchasedAt")
+        .lean()
+    : null;
 
-  if (errorAt === 0 && feedbackAt === 0) return null;
+  const candidates: Array<{ at: number; platform: Platform | null }> = [
+    {
+      at: latestError?.lastSeenAt?.getTime() ?? 0,
+      platform: asPlatform(latestError?.platform),
+    },
+    {
+      at: latestFeedback?.createdAt?.getTime() ?? 0,
+      platform: asPlatform(latestFeedback?.platform),
+    },
+    {
+      at: latestTransaction?.purchasedAt?.getTime() ?? 0,
+      platform: platformFromStore(latestTransaction?.store),
+    },
+  ];
 
-  const winner = errorAt >= feedbackAt ? latestError : latestFeedback;
-  const platform = winner?.platform;
-  if (platform === "ios" || platform === "android" || platform === "web") {
-    return platform;
-  }
-  return null;
+  const best = candidates
+    .filter((c) => c.at > 0 && c.platform !== null)
+    .sort((a, b) => b.at - a.at)[0];
+
+  return best?.platform ?? null;
+}
+
+function asPlatform(value: string | undefined): Platform | null {
+  return value === "ios" || value === "android" || value === "web"
+    ? value
+    : null;
 }
 
 main().catch((err) => {

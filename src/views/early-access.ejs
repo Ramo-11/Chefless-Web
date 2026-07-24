@@ -20,7 +20,7 @@
 <!-- ── Import CSV ──────────────────────────────────────────────── -->
 <div class="card" style="margin-bottom:1.25rem;">
   <div class="card-header">
-    <h2><i class="fas fa-file-csv"></i> Import contacts</h2>
+    <h2>Import contacts</h2>
   </div>
   <div class="card-body">
     <p class="text-muted text-sm" style="margin-top:0;">
@@ -37,7 +37,7 @@
     </div>
     <div style="display:flex;justify-content:flex-end;">
       <button class="btn btn-primary btn-sm" id="import-btn" onclick="importCsv()">
-        <i class="fas fa-upload"></i> Import contacts
+        Import contacts
       </button>
     </div>
   </div>
@@ -46,7 +46,7 @@
 <!-- ── Compose & send ──────────────────────────────────────────── -->
 <div class="card" style="margin-bottom:1.25rem;">
   <div class="card-header">
-    <h2><i class="fas fa-paper-plane"></i> Compose campaign</h2>
+    <h2>Compose campaign</h2>
   </div>
   <div class="card-body">
     <p class="text-muted text-sm" style="margin-top:0;">
@@ -74,10 +74,10 @@
     </div>
     <div style="display:flex;justify-content:flex-end;gap:.5rem;">
       <button class="btn btn-secondary btn-sm" onclick="openPreviewModal()">
-        <i class="fas fa-eye"></i> Preview email
+        Preview email
       </button>
       <button class="btn btn-primary btn-sm" onclick="openSendModal()">
-        <i class="fas fa-paper-plane"></i> Review &amp; send
+        Review &amp; send
       </button>
     </div>
   </div>
@@ -87,11 +87,11 @@
 <div class="card" style="margin-bottom:1.25rem;">
   <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
     <h2>
-      <i class="fas fa-address-book"></i> Contacts
+      Contacts
       <span class="badge badge-default" style="margin-left:.35rem;"><%= pagination.totalItems.toLocaleString() %></span>
     </h2>
     <button class="btn btn-primary btn-sm" onclick="openModal('add-contact-modal')">
-      <i class="fas fa-user-plus"></i> Add someone
+      Add someone
     </button>
   </div>
   <div class="card-body" style="padding-bottom:0;">
@@ -110,7 +110,7 @@
         <a href="/admin/early-access?status=unsubscribed<%= search ? '&search=' + encodeURIComponent(search) : '' %>" class="filter-chip <%= statusFilter === 'unsubscribed' ? 'active' : '' %>">Unsubscribed</a>
         <a href="/admin/early-access?status=bounced<%= search ? '&search=' + encodeURIComponent(search) : '' %>" class="filter-chip <%= statusFilter === 'bounced' ? 'active' : '' %>">Bounced</a>
         <a href="/admin/early-access?status=needsReview<%= search ? '&search=' + encodeURIComponent(search) : '' %>" class="filter-chip <%= statusFilter === 'needsReview' ? 'active' : '' %>" style="<%= needsReviewCount > 0 ? 'color:#b45309;' : '' %>">
-          <i class="fas fa-triangle-exclamation"></i> Needs review
+          Needs review
           <% if (needsReviewCount > 0) { %><span class="filter-count"><%= needsReviewCount %></span><% } %>
         </a>
       </div>
@@ -152,8 +152,7 @@
           <td class="text-sm">
             <% if (c.needsReview) { %>
               <span title="This email doesn't look valid — open Edit to fix it. Sends will skip this contact until then." style="color:#b45309;margin-right:.25rem;">
-                <i class="fas fa-triangle-exclamation"></i>
-              </span>
+                </span>
             <% } %>
             <%= c.email %>
           </td>
@@ -180,26 +179,24 @@
             <span class="badge <%= statusClass %>"><%= c.status %></span>
           </td>
           <td>
-            <div class="action-buttons">
-              <button class="btn btn-sm btn-secondary"
-                data-id="<%= c._id %>"
-                data-first="<%= c.firstName || '' %>"
-                data-last="<%= c.lastName || '' %>"
-                data-email="<%= c.email %>"
-                data-phone="<%= c.phone || '' %>"
-                onclick="openEditContact(this)" aria-label="Edit contact">
-                <i class="fas fa-pen"></i>
-              </button>
-              <% if (c.status === 'bounced') { %>
-                <span class="text-muted text-sm">—</span>
-              <% } else { %>
-                <button class="btn btn-sm btn-secondary" onclick="toggleContact('<%= c._id %>')" aria-label="Toggle subscription">
-                  <%= c.status === 'subscribed' ? 'Unsubscribe' : 'Resubscribe' %>
-                </button>
-              <% } %>
-              <button class="btn btn-sm btn-danger-outline" onclick="deleteContact('<%= c._id %>', '<%= c.email.replace(/'/g, "") %>')" aria-label="Delete contact">
-                <i class="fas fa-trash"></i>
-              </button>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for <%= c.email %>">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem"
+                  data-id="<%= c._id %>"
+                  data-first="<%= c.firstName || '' %>"
+                  data-last="<%= c.lastName || '' %>"
+                  data-email="<%= c.email %>"
+                  data-phone="<%= c.phone || '' %>"
+                  onclick="openEditContact(this)">Edit</button>
+                <% if (c.status === 'bounced') { %>
+                  <p class="row-menu-note">This address bounced, so it cannot be resubscribed.</p>
+                <% } else { %>
+                  <button type="button" class="row-menu-item" role="menuitem" onclick="toggleContact('<%= c._id %>')"><%= c.status === 'subscribed' ? 'Unsubscribe' : 'Resubscribe' %></button>
+                <% } %>
+                <div class="row-menu-divider"></div>
+                <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" onclick="deleteContact('<%= c._id %>', '<%= c.email.replace(/'/g, "") %>')">Delete contact</button>
+              </div>
             </div>
           </td>
         </tr>
@@ -207,7 +204,6 @@
         <% if (contacts.length === 0) { %>
         <tr>
           <td colspan="9" class="empty-state">
-            <i class="fas fa-address-book"></i>
             <span>No contacts<%= search || statusFilter !== 'all' ? ' match this filter' : ' yet — import the CSV above to get started' %>.</span>
           </td>
         </tr>
@@ -224,7 +220,7 @@
 <!-- ── Past campaigns ──────────────────────────────────────────── -->
 <div class="card">
   <div class="card-header">
-    <h2><i class="fas fa-clock-rotate-left"></i> Sent campaigns</h2>
+    <h2>Sent campaigns</h2>
   </div>
   <div class="table-responsive">
     <table class="data-table">
@@ -269,7 +265,7 @@
               data-body="<%= c.body %>"
               data-meta="<%= c.audience === 'selected' ? 'Selected contacts' : 'All subscribers' %> · <%= c.sentCount %>/<%= c.recipientCount %> delivered · <%= new Date(c.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) %> · by <%= c.sentByEmail %>"
               onclick="viewCampaign(this)" aria-label="View campaign content">
-              <i class="fas fa-eye"></i> View
+              View
             </button>
           </td>
         </tr>
@@ -277,7 +273,6 @@
         <% if (campaigns.length === 0) { %>
         <tr>
           <td colspan="9" class="empty-state">
-            <i class="fas fa-clock-rotate-left"></i>
             <span>No campaigns sent yet.</span>
           </td>
         </tr>

@@ -1,10 +1,10 @@
 <div class="pagination">
   <% if (pagination.current > 1) { %>
     <a href="<%= baseUrl %>&page=<%= pagination.current - 1 %>" class="pagination-btn">
-      <i class="fas fa-chevron-left"></i> Previous
+      &lt;- Previous
     </a>
   <% } else { %>
-    <span class="pagination-btn disabled"><i class="fas fa-chevron-left"></i> Previous</span>
+    <span class="pagination-btn disabled">&lt;- Previous</span>
   <% } %>
 
   <div class="pagination-pages">
@@ -19,9 +19,9 @@
 
   <% if (pagination.current < pagination.total) { %>
     <a href="<%= baseUrl %>&page=<%= pagination.current + 1 %>" class="pagination-btn">
-      Next <i class="fas fa-chevron-right"></i>
+      Next -&gt;
     </a>
   <% } else { %>
-    <span class="pagination-btn disabled">Next <i class="fas fa-chevron-right"></i></span>
+    <span class="pagination-btn disabled">Next -&gt;</span>
   <% } %>
 </div>

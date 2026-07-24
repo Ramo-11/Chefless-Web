@@ -73,13 +73,12 @@
           <td class="text-muted"><%= new Date(report.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %></td>
           <td>
             <% if (report.status === 'pending') { %>
-            <div class="action-buttons">
-              <button class="btn btn-sm btn-primary" onclick="showReviewModal('<%= report._id %>')" aria-label="Review report">
-                Review
-              </button>
-              <button class="btn btn-sm btn-secondary" onclick="dismissReport('<%= report._id %>')" aria-label="Dismiss report">
-                Dismiss
-              </button>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for this report">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem" onclick="showReviewModal('<%= report._id %>')">Review</button>
+                <button type="button" class="row-menu-item" role="menuitem" onclick="dismissReport('<%= report._id %>')">Dismiss</button>
+              </div>
             </div>
             <% } else { %>
               <span class="text-muted text-sm">
@@ -94,7 +93,6 @@
         <% if (reports.length === 0) { %>
         <tr>
           <td colspan="6" class="empty-state">
-            <i class="fas fa-check-circle"></i>
             <span>No reports to show</span>
           </td>
         </tr>

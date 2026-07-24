@@ -11,7 +11,7 @@
 <div class="page-header">
   <div>
     <a href="/admin/errors" class="text-muted text-sm" style="display:inline-flex;align-items:center;gap:.35rem;">
-      <i class="fas fa-chevron-left"></i> Back to crashes
+      &lt;- Back to crashes
     </a>
     <h1 style="margin-top:.35rem;"><%= item.exception.length > 140 ? item.exception.slice(0, 140) + '…' : item.exception %></h1>
     <p class="page-subtitle">
@@ -25,14 +25,14 @@
     <span class="badge <%= statusClass %>"><%= item.status %></span>
     <% if (permanentlyIgnored) { %>
       <span class="badge badge-warning" title="Future occurrences of this crash will not be reported">
-        <i class="fas fa-ban"></i> Permanently ignored
+        Permanently ignored
       </span>
     <% } %>
   </div>
 </div>
 
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-info-circle"></i> Context</h2></div>
+  <div class="card-header"><h2>Context</h2></div>
   <div class="card-body">
     <div class="text-sm">
       <div><strong>Source:</strong> <%= item.source %></div>
@@ -57,7 +57,7 @@
 </div>
 
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-bug"></i> Exception</h2></div>
+  <div class="card-header"><h2>Exception</h2></div>
   <div class="card-body">
     <pre style="white-space:pre-wrap;background:var(--gray-50);padding:1rem;border-radius:6px;margin:0;font-size:13px;"><%= item.exception %></pre>
   </div>
@@ -65,7 +65,7 @@
 
 <% if (item.reason) { %>
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-comment"></i> Reason</h2></div>
+  <div class="card-header"><h2>Reason</h2></div>
   <div class="card-body">
     <pre style="white-space:pre-wrap;background:var(--gray-50);padding:1rem;border-radius:6px;margin:0;font-size:13px;"><%= item.reason %></pre>
   </div>
@@ -74,7 +74,7 @@
 
 <% if (item.stack) { %>
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-stream"></i> Stack trace</h2></div>
+  <div class="card-header"><h2>Stack trace</h2></div>
   <div class="card-body">
     <pre style="white-space:pre-wrap;background:var(--gray-50);padding:1rem;border-radius:6px;margin:0;font-size:12px;max-height:560px;overflow:auto;"><%= item.stack %></pre>
   </div>
@@ -82,7 +82,7 @@
 <% } %>
 
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-flag"></i> Status</h2></div>
+  <div class="card-header"><h2>Status</h2></div>
   <div class="card-body">
     <form action="/admin/errors/<%= item._id %>/status" method="POST" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -99,7 +99,7 @@
 </div>
 
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-sticky-note"></i> Admin note</h2></div>
+  <div class="card-header"><h2>Admin note</h2></div>
   <div class="card-body">
     <form action="/admin/errors/<%= item._id %>/note" method="POST">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -115,7 +115,7 @@
 </div>
 
 <div class="card" style="margin-bottom:1rem;">
-  <div class="card-header"><h2><i class="fas fa-ban"></i> Ignore permanently</h2></div>
+  <div class="card-header"><h2>Ignore permanently</h2></div>
   <div class="card-body">
     <% if (permanentlyIgnored) { %>
       <p class="text-muted text-sm" style="margin-top:0;">
@@ -138,7 +138,7 @@
         </div>
         <div style="display:flex;justify-content:flex-end;">
           <button type="submit" class="btn btn-warning btn-sm">
-            <i class="fas fa-ban"></i> Ignore permanently
+            Ignore permanently
           </button>
         </div>
       </form>
@@ -148,7 +148,7 @@
 
 <div class="card" style="border:1px solid var(--danger-light);">
   <div class="card-header">
-    <h2 style="color:var(--danger);"><i class="fas fa-trash"></i> Danger zone</h2>
+    <h2 style="color:var(--danger);">Danger zone</h2>
   </div>
   <div class="card-body">
     <p class="text-muted text-sm" style="margin-top:0;">Deletes this crash and all its occurrence counters.</p>

@@ -81,8 +81,11 @@
           </td>
           <td class="text-muted"><%= new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %></td>
           <td>
-            <div class="action-buttons">
-              <a class="btn btn-sm btn-primary" href="/admin/feedback/<%= item._id %>" aria-label="Open feedback">Open</a>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for this feedback">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem" onclick="location.href='/admin/feedback/<%= item._id %>'">Open</button>
+              </div>
             </div>
           </td>
         </tr>
@@ -90,7 +93,6 @@
         <% if (feedbackItems.length === 0) { %>
         <tr>
           <td colspan="7" class="empty-state">
-            <i class="fas fa-comment-dots"></i>
             <span>No feedback to show</span>
           </td>
         </tr>

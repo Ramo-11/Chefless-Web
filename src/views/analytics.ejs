@@ -8,36 +8,27 @@
 
 <!-- KPI Stats Row -->
 <div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-blue">
-      <i class="fas fa-users"></i>
-    </div>
+  <div class="stat-card stat-accent-blue">
     <div class="stat-content">
       <span class="stat-value"><%= activeUsers30d.toLocaleString() %></span>
       <span class="stat-label">Active Users (30d)</span>
     </div>
     <div class="stat-trend stat-trend-up">
-      <i class="fas fa-percentage"></i> <%= retention30d %>% of total
+      <%= retention30d %>% of total
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <i class="fas fa-book-open"></i>
-    </div>
+  <div class="stat-card stat-accent-green">
     <div class="stat-content">
       <span class="stat-value"><%= recipesThisMonth.toLocaleString() %></span>
       <span class="stat-label">Recipes This Month</span>
     </div>
     <div class="stat-trend stat-trend-up">
-      <i class="fas fa-arrow-up"></i> <%= recipesThisWeek %> this week
+      <%= recipesThisWeek %> this week
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-amber">
-      <i class="fas fa-crown"></i>
-    </div>
+  <div class="stat-card stat-accent-amber">
     <div class="stat-content">
       <span class="stat-value"><%= premiumRate %>%</span>
       <span class="stat-label">Premium Rate</span>
@@ -47,62 +38,47 @@
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-purple">
-      <i class="fas fa-utensils"></i>
-    </div>
+  <div class="stat-card stat-accent-purple">
     <div class="stat-content">
       <span class="stat-value"><%= avgRecipesPerUser %></span>
       <span class="stat-label">Avg Recipes / User</span>
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <i class="fas fa-heart"></i>
-    </div>
+  <div class="stat-card stat-accent-green">
     <div class="stat-content">
       <span class="stat-value"><%= totalLikes.toLocaleString() %></span>
       <span class="stat-label">Total Likes</span>
     </div>
     <div class="stat-trend">
-      <i class="fas fa-chart-line"></i> <%= avgLikes %> avg per recipe
+      <%= avgLikes %> avg per recipe
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-blue">
-      <i class="fas fa-user-check"></i>
-    </div>
+  <div class="stat-card stat-accent-blue">
     <div class="stat-content">
       <span class="stat-value"><%= retention7d %>%</span>
       <span class="stat-label">7-Day Retention</span>
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-purple">
-      <i class="fas fa-house-chimney"></i>
-    </div>
+  <div class="stat-card stat-accent-purple">
     <div class="stat-content">
       <span class="stat-value"><%= totalKitchens.toLocaleString() %></span>
       <span class="stat-label">Kitchens</span>
     </div>
     <div class="stat-trend">
-      <i class="fas fa-users"></i> <%= avgMembers %> avg members
+      <%= avgMembers %> avg members
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-slate">
-      <i class="fas fa-calendar-check"></i>
-    </div>
+  <div class="stat-card stat-accent-slate">
     <div class="stat-content">
       <span class="stat-value"><%= totalScheduleEntries.toLocaleString() %></span>
       <span class="stat-label">Schedule Entries</span>
     </div>
     <div class="stat-trend">
-      <i class="fas fa-arrow-up"></i> <%= scheduleEntriesMonth %> this month
+      <%= scheduleEntriesMonth %> this month
     </div>
   </div>
 </div>
@@ -110,35 +86,27 @@
 <!-- Social Stats Row -->
 <div class="analytics-metric-row">
   <div class="metric-pill">
-    <i class="fas fa-code-branch"></i>
     <span><strong><%= totalForks.toLocaleString() %></strong> remixes</span>
   </div>
   <div class="metric-pill">
-    <i class="fas fa-user-plus"></i>
     <span><strong><%= totalFollows.toLocaleString() %></strong> follows</span>
   </div>
   <div class="metric-pill">
-    <i class="fas fa-user-group"></i>
     <span><strong><%= avgFollowers %></strong> avg followers/user</span>
   </div>
   <div class="metric-pill">
-    <i class="fas fa-clipboard-check"></i>
     <span><strong><%= onboardingCompleted.toLocaleString() %></strong> onboarded</span>
   </div>
   <div class="metric-pill">
-    <i class="fas fa-camera"></i>
     <span><strong><%= recipeBasedEntries.toLocaleString() %></strong> recipe-based schedules</span>
   </div>
   <div class="metric-pill">
-    <i class="fas fa-pencil"></i>
     <span><strong><%= freeformEntries.toLocaleString() %></strong> freeform schedules</span>
   </div>
   <div class="metric-pill metric-pill-alert">
-    <i class="fas fa-ban"></i>
     <span><strong><%= bannedUsers %></strong> banned</span>
   </div>
   <div class="metric-pill metric-pill-alert">
-    <i class="fas fa-eye-slash"></i>
     <span><strong><%= hiddenRecipes %></strong> hidden recipes</span>
   </div>
 </div>
@@ -148,7 +116,7 @@
   <!-- User Growth -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-user-plus"></i> User Growth</h3>
+      <h3>User Growth</h3>
       <span class="chart-card-subtitle">Daily signups, last 30 days</span>
     </div>
     <div class="chart-container">
@@ -159,7 +127,7 @@
   <!-- Recipe Creation -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-book-open"></i> Recipe Creation</h3>
+      <h3>Recipe Creation</h3>
       <span class="chart-card-subtitle">Daily new recipes, last 30 days</span>
     </div>
     <div class="chart-container">
@@ -170,7 +138,7 @@
   <!-- Dietary Tags -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-leaf"></i> Dietary Tags</h3>
+      <h3>Dietary Tags</h3>
       <span class="chart-card-subtitle">Top 10 recipe tags</span>
     </div>
     <div class="chart-container chart-container-doughnut">
@@ -181,7 +149,7 @@
   <!-- Meal Slot Distribution -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-clock"></i> Meal Slots</h3>
+      <h3>Meal Slots</h3>
       <span class="chart-card-subtitle">Schedule entries by meal type</span>
     </div>
     <div class="chart-container chart-container-doughnut">
@@ -192,7 +160,7 @@
   <!-- Premium Breakdown -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-crown"></i> Premium Breakdown</h3>
+      <h3>Premium Breakdown</h3>
       <span class="chart-card-subtitle">User subscription types</span>
     </div>
     <div class="chart-container chart-container-doughnut">
@@ -203,7 +171,7 @@
   <!-- Schedule Trend -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-calendar-alt"></i> Schedule Trend</h3>
+      <h3>Schedule Trend</h3>
       <span class="chart-card-subtitle">Weekly entries, last 12 weeks</span>
     </div>
     <div class="chart-container">
@@ -214,7 +182,7 @@
   <!-- Report Status -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-flag"></i> Report Status</h3>
+      <h3>Report Status</h3>
       <span class="chart-card-subtitle">Reports by current status</span>
     </div>
     <div class="chart-container chart-container-doughnut">
@@ -225,7 +193,7 @@
   <!-- Report Reasons -->
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-exclamation-triangle"></i> Report Reasons</h3>
+      <h3>Report Reasons</h3>
       <span class="chart-card-subtitle">Why content gets reported</span>
     </div>
     <div class="chart-container chart-container-doughnut">
@@ -239,7 +207,7 @@
   <!-- Top Most Liked Recipes -->
   <div class="card">
     <div class="card-header">
-      <h2><i class="fas fa-heart"></i> Most Liked Recipes</h2>
+      <h2>Most Liked Recipes</h2>
     </div>
     <div class="table-responsive">
       <table class="data-table">
@@ -258,8 +226,8 @@
             <td class="text-muted"><%= i + 1 %></td>
             <td><strong><%= recipe.title %></strong></td>
             <td class="text-muted"><%= recipe.authorName %></td>
-            <td><span class="badge badge-default"><i class="fas fa-heart"></i> <%= recipe.likesCount %></span></td>
-            <td><span class="badge badge-default"><i class="fas fa-code-branch"></i> <%= recipe.forksCount %></span></td>
+            <td><span class="badge badge-default"><%= recipe.likesCount %></span></td>
+            <td><span class="badge badge-default"><%= recipe.forksCount %></span></td>
           </tr>
           <% }); %>
           <% if (topLikedRecipes.length === 0) { %>
@@ -273,7 +241,7 @@
   <!-- Top Most Remixed Recipes -->
   <div class="card">
     <div class="card-header">
-      <h2><i class="fas fa-code-branch"></i> Most Remixed Recipes</h2>
+      <h2>Most Remixed Recipes</h2>
     </div>
     <div class="table-responsive">
       <table class="data-table">
@@ -292,8 +260,8 @@
             <td class="text-muted"><%= i + 1 %></td>
             <td><strong><%= recipe.title %></strong></td>
             <td class="text-muted"><%= recipe.authorName %></td>
-            <td><span class="badge badge-default"><i class="fas fa-code-branch"></i> <%= recipe.forksCount %></span></td>
-            <td><span class="badge badge-default"><i class="fas fa-heart"></i> <%= recipe.likesCount %></span></td>
+            <td><span class="badge badge-default"><%= recipe.forksCount %></span></td>
+            <td><span class="badge badge-default"><%= recipe.likesCount %></span></td>
           </tr>
           <% }); %>
           <% if (topRemixedRecipes.length === 0) { %>
@@ -307,7 +275,7 @@
   <!-- Top Most Active Users -->
   <div class="card">
     <div class="card-header">
-      <h2><i class="fas fa-trophy"></i> Most Active Users</h2>
+      <h2>Most Active Users</h2>
     </div>
     <div class="table-responsive">
       <table class="data-table">
@@ -341,7 +309,7 @@
   <!-- Most Followed Users -->
   <div class="card">
     <div class="card-header">
-      <h2><i class="fas fa-star"></i> Most Followed Users</h2>
+      <h2>Most Followed Users</h2>
     </div>
     <div class="table-responsive">
       <table class="data-table">
@@ -375,7 +343,7 @@
   <!-- AI usage -->
   <div class="card">
     <div class="card-header">
-      <h2><i class="fas fa-robot"></i> AI Usage</h2>
+      <h2>AI Usage</h2>
     </div>
     <div class="ai-usage-summary">
       <div class="ai-usage-stat">

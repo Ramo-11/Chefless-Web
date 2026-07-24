@@ -25,7 +25,7 @@
 
   <div class="toolbar-actions">
     <button class="btn btn-danger btn-sm" onclick="confirmWipeAll()">
-      <i class="fas fa-trash"></i> Wipe All Seed Data
+      Wipe All Seed Data
     </button>
   </div>
 </div>
@@ -55,13 +55,13 @@
               <% }); %>
             </td>
             <td>
-              <div class="action-buttons">
-                <button class="btn btn-sm btn-secondary" onclick="viewCuisine('<%= g._id %>')" aria-label="View users + recipes">
-                  <i class="fas fa-eye"></i> View
-                </button>
-                <button class="btn btn-sm btn-danger-outline" onclick="confirmWipeCuisine('<%= g._id %>')" aria-label="Delete cuisine">
-                  <i class="fas fa-trash"></i>
-                </button>
+              <div class="row-menu">
+                <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for <%= g._id %>">...</button>
+                <div class="row-menu-list" role="menu">
+                  <button type="button" class="row-menu-item" role="menuitem" onclick="viewCuisine('<%= g._id %>')">View users and recipes</button>
+                  <div class="row-menu-divider"></div>
+                  <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" onclick="confirmWipeCuisine('<%= g._id %>')">Delete cuisine</button>
+                </div>
               </div>
             </td>
           </tr>
@@ -69,7 +69,6 @@
         <% if (groups.length === 0) { %>
           <tr>
             <td colspan="5" class="empty-state">
-              <i class="fas fa-seedling"></i>
               <span>No seed data yet. Run <code>tsx src/scripts/seed/seed-real-recipes.ts</code> to populate.</span>
             </td>
           </tr>
@@ -93,10 +92,10 @@
       </div>
 
       <div id="seed-users-pane" class="seed-pane">
-        <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+        <div class="loading-spinner">Loading...</div>
       </div>
       <div id="seed-recipes-pane" class="seed-pane" style="display: none;">
-        <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+        <div class="loading-spinner">Loading...</div>
       </div>
     </div>
   </div>
@@ -149,7 +148,7 @@
 
   function loadSeedUsers() {
     const pane = document.getElementById('seed-users-pane');
-    pane.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    pane.innerHTML = '<div class="loading-spinner">Loading...</div>';
     const params = new URLSearchParams();
     if (currentSeedCuisine) params.set('cuisine', currentSeedCuisine);
     adminFetch('/admin/api/seed-data/users?' + params.toString())
@@ -176,9 +175,7 @@
                   <td>${Number(u.recipesCount) || 0}</td>
                   <td><span class="badge badge-default">${esc(u.seedSource || '')}</span></td>
                   <td>
-                    <button class="btn btn-sm btn-danger-outline" onclick="deleteSeedUser('${u._id}', '${esc(u.fullName).replace(/'/g, "\\'")}')" aria-label="Delete user">
-                      <i class="fas fa-trash"></i>
-                    </button>
+                    <button class="btn btn-sm btn-danger-outline" onclick="deleteSeedUser('${u._id}', '${esc(u.fullName).replace(/'/g, "\\'")}')">Delete</button>
                   </td>
                 </tr>
               `).join('')}
@@ -193,7 +190,7 @@
 
   function loadSeedRecipes() {
     const pane = document.getElementById('seed-recipes-pane');
-    pane.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    pane.innerHTML = '<div class="loading-spinner">Loading...</div>';
     const params = new URLSearchParams();
     if (currentSeedCuisine) params.set('cuisine', currentSeedCuisine);
     adminFetch('/admin/api/seed-data/recipes?' + params.toString())
@@ -217,9 +214,7 @@
                   <td class="text-muted">${esc(r.authorId?.fullName || '—')}</td>
                   <td><span class="badge badge-default">${esc(r.seedSource || '')}</span></td>
                   <td>
-                    <button class="btn btn-sm btn-danger-outline" onclick="deleteSeedRecipe('${r._id}', '${esc(r.title).replace(/'/g, "\\'")}')" aria-label="Delete recipe">
-                      <i class="fas fa-trash"></i>
-                    </button>
+                    <button class="btn btn-sm btn-danger-outline" onclick="deleteSeedRecipe('${r._id}', '${esc(r.title).replace(/'/g, "\\'")}')">Delete</button>
                   </td>
                 </tr>
               `).join('')}

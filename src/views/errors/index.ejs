@@ -8,7 +8,7 @@
   </div>
   <div style="display:flex;gap:.5rem;align-items:center;">
     <a href="/admin/errors/ignored" class="btn btn-secondary btn-sm">
-      <i class="fas fa-ban"></i> Ignored list
+      Ignored list
     </a>
     <% if (items.length > 0) { %>
     <form action="/admin/errors/delete-all" method="POST"
@@ -17,7 +17,7 @@
       <input type="hidden" name="status" value="<%= status %>">
       <input type="hidden" name="platform" value="<%= platform %>">
       <button type="submit" class="btn btn-danger btn-sm">
-        <i class="fas fa-trash"></i> Clear all in view
+        Clear all in view
       </button>
     </form>
     <% } %>
@@ -89,13 +89,17 @@
             <span class="badge <%= statusClass %>"><%= item.status %></span>
           </td>
           <td>
-            <div class="action-buttons">
-              <a class="btn btn-sm btn-primary" href="/admin/errors/<%= item._id %>">Open</a>
-              <form action="/admin/errors/<%= item._id %>/delete" method="POST" style="display:inline;"
-                    onsubmit="return confirm('Delete this crash permanently?');">
-                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-              </form>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for this crash">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem" onclick="location.href='/admin/errors/<%= item._id %>'">Open</button>
+                <div class="row-menu-divider"></div>
+                <form action="/admin/errors/<%= item._id %>/delete" method="POST"
+                      onsubmit="return confirm('Delete this crash permanently?');">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button type="submit" class="row-menu-item row-menu-item-danger" role="menuitem">Delete</button>
+                </form>
+              </div>
             </div>
           </td>
         </tr>
@@ -103,7 +107,6 @@
         <% if (items.length === 0) { %>
         <tr>
           <td colspan="8" class="empty-state">
-            <i class="fas fa-shield-alt"></i>
             <span>No crashes in this view</span>
           </td>
         </tr>

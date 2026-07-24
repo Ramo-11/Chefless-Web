@@ -23,17 +23,19 @@
             </span>
           </div>
           <div class="seasonal-card-meta">
-            <span><i class="fas fa-calendar"></i> <%= new Date(tag.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %> – <%= new Date(tag.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></span>
-            <span><i class="fas fa-book-open"></i> <%= tag.recipesCount %> recipes</span>
+            <span><%= new Date(tag.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) %> to <%= new Date(tag.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></span>
+            <span><%= tag.recipesCount %> recipes</span>
           </div>
         </a>
         <div class="seasonal-card-actions">
-          <button class="btn btn-sm btn-secondary" data-id="<%= tag._id %>" onclick="toggleTag(this.dataset.id)" aria-label="Toggle active">
-            <i class="fas fa-<%= tag.isActive ? 'pause' : 'play' %>"></i>
-          </button>
-          <button class="btn btn-sm btn-danger-outline" data-id="<%= tag._id %>" data-name="<%= tag.name %>" onclick="deleteTag(this.dataset.id, this.dataset.name)" aria-label="Delete tag">
-            <i class="fas fa-trash"></i>
-          </button>
+          <div class="row-menu">
+            <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for <%= tag.name %>">...</button>
+            <div class="row-menu-list" role="menu">
+              <button type="button" class="row-menu-item" role="menuitem" data-id="<%= tag._id %>" onclick="toggleTag(this.dataset.id)"><%= tag.isActive ? 'Deactivate' : 'Activate' %></button>
+              <div class="row-menu-divider"></div>
+              <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" data-id="<%= tag._id %>" data-name="<%= tag.name %>" onclick="deleteTag(this.dataset.id, this.dataset.name)">Delete tag</button>
+            </div>
+          </div>
         </div>
       </div>
       <% }); %>
@@ -66,7 +68,7 @@
         </div>
       </div>
       <button class="btn btn-primary" onclick="createTag()">
-        <i class="fas fa-plus"></i> Create Tag
+        Create Tag
       </button>
     </div>
   </div>
@@ -91,8 +93,8 @@
                 <span class="text-muted text-sm">by <%= recipe.authorId ? recipe.authorId.fullName : 'Unknown' %></span>
               </div>
             </div>
-            <button class="btn btn-sm btn-danger-outline" data-id="<%= recipe._id %>" data-tag="<%= selectedTag %>" onclick="untagRecipe(this.dataset.id, this.dataset.tag)" aria-label="Remove tag">
-              <i class="fas fa-times"></i>
+            <button class="btn btn-sm btn-danger-outline" data-id="<%= recipe._id %>" data-tag="<%= selectedTag %>" onclick="untagRecipe(this.dataset.id, this.dataset.tag)">
+              Remove
             </button>
           </div>
           <% }); %>
@@ -108,10 +110,7 @@
     </div>
     <div class="card-body">
       <form action="/admin/seasonal" method="GET" class="toolbar-search" style="margin-bottom: 1rem;">
-        <div class="input-with-icon">
-          <i class="fas fa-search"></i>
-          <input type="text" name="search" value="<%= search %>" placeholder="Search recipes by title...">
-        </div>
+        <input type="text" name="search" value="<%= search %>" placeholder="Search recipes by title...">
         <% if (selectedTag) { %><input type="hidden" name="tag" value="<%= selectedTag %>"><% } %>
         <button type="submit" class="btn btn-primary btn-sm">Search</button>
       </form>
@@ -134,7 +133,7 @@
             </div>
             <% if (selectedTag) { %>
               <button class="btn btn-sm btn-primary" data-id="<%= recipe._id %>" data-tag="<%= selectedTag %>" onclick="tagRecipe(this.dataset.id, this.dataset.tag)" aria-label="Add tag">
-                <i class="fas fa-plus"></i> Tag
+                Tag
               </button>
             <% } else { %>
               <span class="text-muted text-sm">Select a tag first</span>

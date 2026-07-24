@@ -8,43 +8,31 @@
 
 <!-- Stats Grid -->
 <div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-blue">
-      <i class="fas fa-users"></i>
-    </div>
+  <div class="stat-card stat-accent-blue">
     <div class="stat-content">
       <span class="stat-value"><%= stats.totalUsers.toLocaleString() %></span>
       <span class="stat-label">Total Users</span>
     </div>
     <div class="stat-trend stat-trend-up">
-      <i class="fas fa-arrow-up"></i> <%= stats.newUsersWeek %> this week
+      <%= stats.newUsersWeek %> this week
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <i class="fas fa-book-open"></i>
-    </div>
+  <div class="stat-card stat-accent-green">
     <div class="stat-content">
       <span class="stat-value"><%= stats.totalRecipes.toLocaleString() %></span>
       <span class="stat-label">Recipes</span>
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-purple">
-      <i class="fas fa-house-chimney"></i>
-    </div>
+  <div class="stat-card stat-accent-purple">
     <div class="stat-content">
       <span class="stat-value"><%= stats.totalKitchens.toLocaleString() %></span>
       <span class="stat-label">Kitchens</span>
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-amber">
-      <i class="fas fa-crown"></i>
-    </div>
+  <div class="stat-card stat-accent-amber">
     <div class="stat-content">
       <span class="stat-value"><%= stats.premiumUsers.toLocaleString() %></span>
       <span class="stat-label">Premium Users</span>
@@ -52,62 +40,47 @@
   </div>
 
   <% if (revenue) { %>
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <i class="fas fa-dollar-sign"></i>
-    </div>
+  <div class="stat-card stat-accent-green">
     <div class="stat-content">
       <span class="stat-value"><%= revenue.netRevenue.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %></span>
       <span class="stat-label">Net Revenue</span>
     </div>
-    <a href="/admin/revenue" class="stat-action stat-action-revenue">View revenue <i class="fas fa-arrow-right"></i></a>
+    <a href="/admin/revenue" class="stat-action stat-action-revenue">View revenue -&gt;</a>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-purple">
-      <i class="fas fa-arrows-rotate"></i>
-    </div>
+  <div class="stat-card stat-accent-purple">
     <div class="stat-content">
       <span class="stat-value"><%= revenue.mrr.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) %></span>
       <span class="stat-label">MRR</span>
     </div>
-    <div class="stat-trend"><i class="fas fa-users"></i> <%= revenue.payingSubscribers.toLocaleString() %> paying</div>
+    <div class="stat-trend"><%= revenue.payingSubscribers.toLocaleString() %> paying</div>
   </div>
   <% } %>
 
-  <div class="stat-card <%= stats.pendingReports > 0 ? 'stat-card-alert' : '' %>">
-    <div class="stat-icon stat-icon-red">
-      <i class="fas fa-flag"></i>
-    </div>
+  <div class="stat-card stat-accent-red <%= stats.pendingReports > 0 ? 'stat-card-alert' : '' %>">
     <div class="stat-content">
       <span class="stat-value"><%= stats.pendingReports %></span>
       <span class="stat-label">Pending Reports</span>
     </div>
     <% if (stats.pendingReports > 0) { %>
-      <a href="/admin/reports" class="stat-action">Review <i class="fas fa-arrow-right"></i></a>
+      <a href="/admin/reports" class="stat-action">Review -&gt;</a>
     <% } %>
   </div>
 
-  <div class="stat-card <%= stats.openCrashes > 0 ? 'stat-card-alert' : '' %>">
-    <div class="stat-icon stat-icon-red">
-      <i class="fas fa-bug"></i>
-    </div>
+  <div class="stat-card stat-accent-red <%= stats.openCrashes > 0 ? 'stat-card-alert' : '' %>">
     <div class="stat-content">
       <span class="stat-value"><%= stats.openCrashes %></span>
       <span class="stat-label">Open Crashes</span>
     </div>
     <% if (stats.crashesWeek > 0) { %>
-      <div class="stat-trend"><i class="fas fa-clock"></i> <%= stats.crashesWeek %> this week</div>
+      <div class="stat-trend"><%= stats.crashesWeek %> this week</div>
     <% } %>
     <% if (stats.openCrashes > 0) { %>
-      <a href="/admin/errors" class="stat-action">Investigate <i class="fas fa-arrow-right"></i></a>
+      <a href="/admin/errors" class="stat-action">Investigate -&gt;</a>
     <% } %>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-slate">
-      <i class="fas fa-ban"></i>
-    </div>
+  <div class="stat-card stat-accent-slate">
     <div class="stat-content">
       <span class="stat-value"><%= stats.bannedUsers %></span>
       <span class="stat-label">Banned Users</span>
@@ -118,7 +91,7 @@
 <!-- Recent Users -->
 <div class="card">
   <div class="card-header">
-    <h2><i class="fas fa-user-plus"></i> Recent Signups</h2>
+    <h2>Recent Signups</h2>
     <a href="/admin/users" class="btn btn-sm btn-secondary">View All</a>
   </div>
   <div class="table-responsive">
@@ -149,7 +122,7 @@
           <td class="text-muted"><%= user.email %></td>
           <td>
             <% if (user.isPremium) { %>
-              <span class="badge badge-premium"><i class="fas fa-crown"></i> Premium</span>
+              <span class="badge badge-premium">Premium</span>
             <% } else { %>
               <span class="badge badge-default">Free</span>
             <% } %>

@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <a href="/admin/errors" class="text-muted text-sm" style="display:inline-flex;align-items:center;gap:.35rem;">
-      <i class="fas fa-chevron-left"></i> Back to crashes
+      &lt;- Back to crashes
     </a>
     <h1 style="margin-top:.35rem;">Ignored crashes</h1>
     <p class="page-subtitle">
@@ -54,7 +54,7 @@
                   onsubmit="return confirm('Remove from ignored list? Future occurrences of this crash will start being reported again.');">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-sm btn-secondary">
-                <i class="fas fa-undo"></i> Remove
+                Remove
               </button>
             </form>
           </td>
@@ -63,7 +63,6 @@
         <% if (items.length === 0) { %>
         <tr>
           <td colspan="7" class="empty-state">
-            <i class="fas fa-ban"></i>
             <span>No ignored crashes yet — use "Ignore permanently" on a crash detail page to add one.</span>
           </td>
         </tr>

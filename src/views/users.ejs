@@ -9,10 +9,7 @@
 <!-- Filters -->
 <div class="toolbar">
   <form action="/admin/users" method="GET" class="toolbar-search">
-    <div class="input-with-icon">
-      <i class="fas fa-search"></i>
-      <input type="text" name="search" value="<%= search %>" placeholder="Search by name or email...">
-    </div>
+    <input type="text" name="search" value="<%= search %>" placeholder="Search by name or email...">
     <input type="hidden" name="filter" value="<%= filter %>">
     <button type="submit" class="btn btn-primary btn-sm">Search</button>
   </form>
@@ -67,9 +64,9 @@
             <div class="badge-group">
               <% if (user.isPremium) { %>
                 <% if (user.premiumPlan === 'admin') { %>
-                  <span class="badge badge-premium" title="Granted by an admin"><i class="fas fa-crown"></i> Premium · Comp</span>
+                  <span class="badge badge-premium" title="Granted by an admin">Premium (comp)</span>
                 <% } else { %>
-                  <span class="badge badge-premium" title="Paid subscriber"><i class="fas fa-crown"></i> Premium · Paid</span>
+                  <span class="badge badge-premium" title="Paid subscriber">Premium (paid)</span>
                 <% } %>
               <% } %>
               <% if (user.isBanned) { %>
@@ -85,48 +82,38 @@
           </td>
           <td>
             <% if (user.lastKnownPlatform === 'ios') { %>
-              <span class="badge badge-default" title="Last seen on iOS"><i class="fab fa-apple"></i> iOS</span>
+              <span class="badge badge-default" title="Last seen on iOS">iOS</span>
             <% } else if (user.lastKnownPlatform === 'android') { %>
-              <span class="badge badge-default" title="Last seen on Android"><i class="fab fa-android"></i> Android</span>
+              <span class="badge badge-default" title="Last seen on Android">Android</span>
             <% } else if (user.lastKnownPlatform === 'web') { %>
-              <span class="badge badge-default" title="Last seen on web"><i class="fas fa-globe"></i> Web</span>
+              <span class="badge badge-default" title="Last seen on web">Web</span>
             <% } else { %>
-              <span class="text-muted">—</span>
+              <span class="text-muted" title="No device reported yet">Unknown</span>
             <% } %>
           </td>
           <td class="text-muted"><%= new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) %></td>
           <td class="text-muted"><%= user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Never' %></td>
           <td>
-            <div class="action-buttons">
-              <button class="btn btn-sm btn-secondary" data-id="<%= user._id %>" onclick="viewUser(this.dataset.id)" aria-label="View user details">
-                <i class="fas fa-eye"></i>
-              </button>
-              <button class="btn btn-sm btn-secondary" data-id="<%= user._id %>" onclick="editUser(this.dataset.id)" aria-label="Edit user">
-                <i class="fas fa-pencil-alt"></i>
-              </button>
-              <% if (!user.isPremium) { %>
-                <button class="btn btn-sm btn-premium-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showGrantPremiumModal(this.dataset.id, this.dataset.name)" aria-label="Grant premium">
-                  <i class="fas fa-crown"></i>
-                </button>
-              <% } else { %>
-                <button class="btn btn-sm btn-warning-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="revokePremium(this.dataset.id, this.dataset.name)" aria-label="Revoke premium">
-                  <i class="fas fa-crown" style="text-decoration: line-through;"></i>
-                </button>
-              <% } %>
-              <% if (!user.isBanned) { %>
-                <button class="btn btn-sm btn-danger-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showBanModal(this.dataset.id, this.dataset.name)" aria-label="Ban user">
-                  <i class="fas fa-ban"></i>
-                </button>
-              <% } else { %>
-                <button class="btn btn-sm btn-success-outline" data-id="<%= user._id %>" onclick="unbanUser(this.dataset.id)" aria-label="Unban user">
-                  <i class="fas fa-check-circle"></i>
-                </button>
-              <% } %>
-              <% if (!user.isAdmin) { %>
-                <button class="btn btn-sm btn-danger-outline" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showDeleteUserModal(this.dataset.id, this.dataset.name)" aria-label="Delete user">
-                  <i class="fas fa-trash"></i>
-                </button>
-              <% } %>
+            <div class="row-menu">
+              <button type="button" class="row-menu-trigger" aria-haspopup="true" aria-expanded="false" aria-label="Actions for <%= user.fullName %>">...</button>
+              <div class="row-menu-list" role="menu">
+                <button type="button" class="row-menu-item" role="menuitem" data-id="<%= user._id %>" onclick="viewUser(this.dataset.id)">View details</button>
+                <button type="button" class="row-menu-item" role="menuitem" data-id="<%= user._id %>" onclick="editUser(this.dataset.id)">Edit</button>
+                <% if (!user.isPremium) { %>
+                  <button type="button" class="row-menu-item" role="menuitem" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showGrantPremiumModal(this.dataset.id, this.dataset.name)">Grant premium</button>
+                <% } else { %>
+                  <button type="button" class="row-menu-item" role="menuitem" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="revokePremium(this.dataset.id, this.dataset.name)">Revoke premium</button>
+                <% } %>
+                <div class="row-menu-divider"></div>
+                <% if (!user.isBanned) { %>
+                  <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showBanModal(this.dataset.id, this.dataset.name)">Ban user</button>
+                <% } else { %>
+                  <button type="button" class="row-menu-item" role="menuitem" data-id="<%= user._id %>" onclick="unbanUser(this.dataset.id)">Unban user</button>
+                <% } %>
+                <% if (!user.isAdmin) { %>
+                  <button type="button" class="row-menu-item row-menu-item-danger" role="menuitem" data-id="<%= user._id %>" data-name="<%= user.fullName %>" onclick="showDeleteUserModal(this.dataset.id, this.dataset.name)">Delete user</button>
+                <% } %>
+              </div>
             </div>
           </td>
         </tr>
@@ -134,7 +121,6 @@
         <% if (users.length === 0) { %>
         <tr>
           <td colspan="9" class="empty-state">
-            <i class="fas fa-search"></i>
             <span>No users found</span>
           </td>
         </tr>
@@ -157,7 +143,7 @@
       <button class="modal-close" onclick="closeModal('user-detail-modal')" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body" id="user-detail-body">
-      <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="loading-spinner">Loading...</div>
     </div>
   </div>
 </div>
@@ -253,12 +239,12 @@
       <button class="modal-close" onclick="closeModal('delete-user-modal')" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body" id="delete-user-body">
-      <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="loading-spinner">Loading...</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('delete-user-modal')">Cancel</button>
       <button class="btn btn-danger" id="confirm-delete-user-btn" onclick="confirmDeleteUser()" disabled>
-        <i class="fas fa-trash"></i> Delete permanently
+        Delete permanently
       </button>
     </div>
   </div>
@@ -281,7 +267,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('grant-premium-modal')">Cancel</button>
-      <button class="btn btn-premium" onclick="confirmGrantPremium()"><i class="fas fa-crown"></i> Grant Premium</button>
+      <button class="btn btn-premium" onclick="confirmGrantPremium()">Grant Premium</button>
     </div>
   </div>
 </div>
@@ -305,7 +291,7 @@
     const body = document.getElementById('delete-user-body');
     const btn = document.getElementById('confirm-delete-user-btn');
     btn.disabled = true;
-    body.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    body.innerHTML = '<div class="loading-spinner">Loading...</div>';
     openModal('delete-user-modal');
 
     adminFetch('/admin/api/users/' + id + '/delete-impact')
@@ -318,14 +304,13 @@
           : '<ul class="impact-list">' + impact.kitchens.map(k => {
               const role = k.role === 'lead' ? '<span class="badge badge-warning">Lead</span>' : '<span class="badge badge-default">Member</span>';
               const fate = k.willBeDeleted
-                ? `<span class="text-error"><i class="fas fa-exclamation-triangle"></i> Kitchen will be deleted (${Number(k.memberCount) || 0} member${k.memberCount === 1 ? '' : 's'} kicked out)</span>`
+                ? `<span class="text-error">Kitchen will be deleted (${Number(k.memberCount) || 0} member${k.memberCount === 1 ? '' : 's'} kicked out)</span>`
                 : `<span class="text-muted">User will be removed from this kitchen</span>`;
               return `<li><strong>${esc(k.name)}</strong> ${role}<br>${fate}</li>`;
             }).join('') + '</ul>';
 
         body.innerHTML = `
           <div class="alert alert-error">
-            <i class="fas fa-exclamation-triangle"></i>
             <div>
               <strong>This is permanent.</strong> Deleting <strong>${esc(u.fullName)}</strong> (${esc(u.email)}) cascades through every piece of their content. Review the impact below.
             </div>
@@ -383,7 +368,7 @@
     if (!deleteUserId) return;
     const btn = document.getElementById('confirm-delete-user-btn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    btn.innerHTML = 'Deleting...';
     adminFetch('/admin/api/users/' + deleteUserId, { method: 'DELETE' })
       .then(() => {
         closeModal('delete-user-modal');
@@ -392,13 +377,13 @@
       .catch(() => {
         showToast('Failed to delete user', 'error');
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-trash"></i> Delete permanently';
+        btn.innerHTML = 'Delete permanently';
       });
   }
 
   function viewUser(id) {
     openModal('user-detail-modal');
-    document.getElementById('user-detail-body').innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    document.getElementById('user-detail-body').innerHTML = '<div class="loading-spinner">Loading...</div>';
     adminFetch('/admin/api/users/' + id)
       .then(data => {
         const u = data.user;

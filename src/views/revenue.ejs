@@ -57,23 +57,19 @@
     <p class="page-subtitle">Subscription revenue, store cuts, and payouts</p>
   </div>
   <% if (dataSince) { %>
-    <span class="revenue-since"><i class="fas fa-clock"></i> Data since <%= fmtDate(dataSince) %></span>
+    <span class="revenue-since">Data since <%= fmtDate(dataSince) %></span>
   <% } %>
 </div>
 
 <% if (sandboxCount > 0) { %>
   <p class="revenue-sandbox-note">
-    <i class="fas fa-flask"></i>
     <%= fmtNum(sandboxCount) %> sandbox transaction<%= sandboxCount === 1 ? '' : 's' %> excluded from these figures.
   </p>
 <% } %>
 
 <!-- KPI Stats: Row 1 (net, proceeds, MRR, ARR) + Row 2 (gross, store cut, subscribers, ARPU) -->
 <div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <i class="fas fa-dollar-sign"></i>
-    </div>
+  <div class="stat-card stat-accent-green">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(totals.netRevenue) %></span>
       <span class="stat-label">Net Revenue</span>
@@ -81,10 +77,7 @@
     <div class="stat-trend">All time, after refunds</div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-blue">
-      <i class="fas fa-hand-holding-dollar"></i>
-    </div>
+  <div class="stat-card stat-accent-blue">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(totals.estimatedProceeds) %></span>
       <span class="stat-label">Estimated Proceeds</span>
@@ -92,21 +85,15 @@
     <div class="stat-trend">After store cuts</div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-purple">
-      <i class="fas fa-arrows-rotate"></i>
-    </div>
+  <div class="stat-card stat-accent-purple">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(recurring.mrr) %></span>
       <span class="stat-label">MRR</span>
     </div>
-    <div class="stat-trend"><i class="fas fa-users"></i> <%= fmtNum(recurring.payingSubscribers) %> paying</div>
+    <div class="stat-trend"><%= fmtNum(recurring.payingSubscribers) %> paying</div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-purple">
-      <i class="fas fa-chart-line"></i>
-    </div>
+  <div class="stat-card stat-accent-purple">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(recurring.arr) %></span>
       <span class="stat-label">ARR</span>
@@ -114,21 +101,15 @@
     <div class="stat-trend">Annualized run rate</div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-slate">
-      <i class="fas fa-sack-dollar"></i>
-    </div>
+  <div class="stat-card stat-accent-slate">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(totals.grossRevenue) %></span>
       <span class="stat-label">Gross Revenue</span>
     </div>
-    <div class="stat-trend"><i class="fas fa-receipt"></i> <%= fmtNum(totals.transactionCount) %> transactions</div>
+    <div class="stat-trend"><%= fmtNum(totals.transactionCount) %> transactions</div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-amber">
-      <i class="fas fa-store"></i>
-    </div>
+  <div class="stat-card stat-accent-amber">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(totals.storeCut) %></span>
       <span class="stat-label">Store Cut</span>
@@ -136,10 +117,7 @@
     <div class="stat-trend">Apple and Google fees</div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-blue">
-      <i class="fas fa-users"></i>
-    </div>
+  <div class="stat-card stat-accent-blue">
     <div class="stat-content">
       <span class="stat-value"><%= fmtNum(recurring.payingSubscribers) %></span>
       <span class="stat-label">Paying Subscribers</span>
@@ -149,10 +127,7 @@
     </div>
   </div>
 
-  <div class="stat-card">
-    <div class="stat-icon stat-icon-green">
-      <i class="fas fa-user-tag"></i>
-    </div>
+  <div class="stat-card stat-accent-green">
     <div class="stat-content">
       <span class="stat-value"><%= fmtUsd(recurring.arpu) %></span>
       <span class="stat-label">ARPU</span>
@@ -166,7 +141,6 @@
 <!-- Empty state: no transactions recorded yet -->
 <div class="card">
   <div class="empty-state revenue-empty">
-    <i class="fas fa-receipt"></i>
     <p><strong>No transactions recorded yet</strong></p>
     <p>Revenue data flows in automatically from the RevenueCat webhook as customers subscribe, renew, or refund. Once the first purchase lands, this dashboard fills in with gross revenue, store cuts, payouts, and subscriber trends.</p>
   </div>
@@ -177,7 +151,7 @@
 <!-- Monthly revenue trend -->
 <div class="chart-card revenue-chart-full">
   <div class="chart-card-header">
-    <h3><i class="fas fa-chart-column"></i> Monthly Revenue Trend</h3>
+    <h3>Monthly Revenue Trend</h3>
     <span class="chart-card-subtitle">Gross revenue and estimated proceeds, last 12 months</span>
   </div>
   <div class="chart-container chart-container-tall">
@@ -189,7 +163,7 @@
 <div class="revenue-grid-2">
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-store"></i> Gross Revenue by Store</h3>
+      <h3>Gross Revenue by Store</h3>
       <span class="chart-card-subtitle">Where the money comes in</span>
     </div>
     <div class="chart-container chart-container-doughnut">
@@ -199,28 +173,28 @@
 
   <div class="chart-card">
     <div class="chart-card-header">
-      <h3><i class="fas fa-users"></i> Subscribers</h3>
+      <h3>Subscribers</h3>
       <span class="chart-card-subtitle">Active paying members and grants</span>
     </div>
     <div class="revenue-facts">
       <div class="revenue-fact">
-        <span class="revenue-fact-label"><i class="fas fa-calendar-day"></i> Monthly subscribers</span>
+        <span class="revenue-fact-label">Monthly subscribers</span>
         <span class="revenue-fact-value"><%= fmtNum(recurring.monthlySubscribers) %></span>
       </div>
       <div class="revenue-fact">
-        <span class="revenue-fact-label"><i class="fas fa-calendar"></i> Annual subscribers</span>
+        <span class="revenue-fact-label">Annual subscribers</span>
         <span class="revenue-fact-value"><%= fmtNum(recurring.annualSubscribers) %></span>
       </div>
       <div class="revenue-fact">
-        <span class="revenue-fact-label"><i class="fas fa-gift"></i> Complimentary grants</span>
+        <span class="revenue-fact-label">Complimentary grants</span>
         <span class="revenue-fact-value"><%= fmtNum(recurring.adminGrants) %></span>
       </div>
       <div class="revenue-fact">
-        <span class="revenue-fact-label"><i class="fas fa-rotate-left"></i> Refunds</span>
+        <span class="revenue-fact-label">Refunds</span>
         <span class="revenue-fact-value"><%= fmtNum(totals.refundCount) %></span>
       </div>
       <div class="revenue-fact">
-        <span class="revenue-fact-label"><i class="fas fa-money-bill-transfer"></i> Refunded amount</span>
+        <span class="revenue-fact-label">Refunded amount</span>
         <span class="revenue-fact-value text-error"><%= fmtUsd(totals.refunds) %></span>
       </div>
       <p class="revenue-fact-note">Complimentary admin grants are excluded from MRR and ARR.</p>
@@ -231,7 +205,7 @@
 <!-- Store breakdown table -->
 <div class="card">
   <div class="card-header">
-    <h2><i class="fas fa-store"></i> Store Breakdown</h2>
+    <h2>Store Breakdown</h2>
   </div>
   <div class="table-responsive">
     <table class="data-table">
@@ -265,7 +239,7 @@
 <!-- Recent transactions -->
 <div class="card">
   <div class="card-header">
-    <h2><i class="fas fa-receipt"></i> Recent Transactions</h2>
+    <h2>Recent Transactions</h2>
   </div>
   <div class="table-responsive">
     <table class="data-table">
@@ -312,7 +286,7 @@
 <!-- AI cost (Claude) -->
 <div class="card">
   <div class="card-header">
-    <h2><i class="fas fa-robot"></i> AI Cost (Claude)</h2>
+    <h2>AI Cost (Claude)</h2>
   </div>
   <div class="ai-cost-body">
     <div class="ai-cost-tiles">
