@@ -3,7 +3,11 @@
 
 <div class="page-header">
   <h1>User Management</h1>
-  <p class="page-subtitle"><%= pagination.totalItems.toLocaleString() %> total users</p>
+  <% if (typeof focusUserId !== 'undefined' && focusUserId) { %>
+    <p class="page-subtitle">Showing one user. <a href="/admin/users" class="row-link">Show all users</a></p>
+  <% } else { %>
+    <p class="page-subtitle"><%= pagination.totalItems.toLocaleString() %> total users</p>
+  <% } %>
 </div>
 
 <!-- Filters -->
@@ -48,13 +52,13 @@
           <td>
             <div class="user-cell">
               <% if (user.profilePicture) { %>
-                <img src="<%= user.profilePicture %>" alt="" class="avatar-sm">
+                <img src="<%= user.profilePicture %>" alt="" class="avatar-sm" data-initial="<%= user.fullName.charAt(0).toUpperCase() %>" onerror="avatarFallback(this, this.dataset.initial)">
               <% } else { %>
                 <div class="avatar-sm avatar-placeholder">
                   <%= user.fullName.charAt(0).toUpperCase() %>
                 </div>
               <% } %>
-              <span><%= user.fullName %></span>
+              <button type="button" class="row-link" data-id="<%= user._id %>" onclick="viewUser(this.dataset.id)"><%= user.fullName %></button>
             </div>
           </td>
           <td class="text-muted"><%= user.email %></td>
@@ -400,7 +404,7 @@
         document.getElementById('user-detail-body').innerHTML = `
           <div class="detail-grid">
             <div class="detail-header">
-              ${u.profilePicture ? `<img src="${esc(u.profilePicture)}" alt="" class="avatar-lg">` : `<div class="avatar-lg avatar-placeholder">${esc(u.fullName).charAt(0).toUpperCase()}</div>`}
+              ${u.profilePicture ? `<img src="${esc(u.profilePicture)}" alt="" class="avatar-lg" data-initial="${esc(u.fullName).charAt(0).toUpperCase()}" onerror="avatarFallback(this, this.dataset.initial)">` : `<div class="avatar-lg avatar-placeholder">${esc(u.fullName).charAt(0).toUpperCase()}</div>`}
               <div>
                 <h3>${esc(u.fullName)}</h3>
                 <p class="text-muted">${esc(u.email)}</p>
@@ -567,5 +571,11 @@
     })
     .catch(() => showToast('Failed to update user', 'error'));
   }
+
+  <% if (typeof focusUserId !== 'undefined' && focusUserId) { %>
+  document.addEventListener('DOMContentLoaded', function () {
+    viewUser('<%= focusUserId %>');
+  });
+  <% } %>
 </script>
 

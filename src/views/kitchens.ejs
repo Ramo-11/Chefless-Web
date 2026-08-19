@@ -32,11 +32,11 @@
         <% kitchens.forEach(function(kitchen) { %>
         <tr data-kitchen-id="<%= kitchen._id %>">
           <td>
-            <strong><%= kitchen.name %></strong>
+            <button type="button" class="row-link" data-id="<%= kitchen._id %>" onclick="viewKitchen(this.dataset.id)"><strong><%= kitchen.name %></strong></button>
           </td>
           <td>
-            <% if (kitchen.leadId && kitchen.leadId.fullName) { %>
-              <%= kitchen.leadId.fullName %>
+            <% if (kitchen.leadId && kitchen.leadId._id) { %>
+              <a href="/admin/users?user=<%= kitchen.leadId._id %>" class="row-link row-link-muted"><%= kitchen.leadId.fullName %></a>
             <% } else { %>
               <span class="text-muted">Unknown</span>
             <% } %>
@@ -170,8 +170,8 @@
                         <tr>
                           <td>
                             <div class="user-cell">
-                              ${m.profilePicture ? `<img src="${esc(m.profilePicture)}" alt="" class="avatar-sm">` : `<div class="avatar-sm avatar-placeholder">${esc(m.fullName).charAt(0).toUpperCase()}</div>`}
-                              <span>${esc(m.fullName)}</span>
+                              ${m.profilePicture ? `<img src="${esc(m.profilePicture)}" alt="" class="avatar-sm" data-initial="${esc(m.fullName).charAt(0).toUpperCase()}" onerror="avatarFallback(this, this.dataset.initial)">` : `<div class="avatar-sm avatar-placeholder">${esc(m.fullName).charAt(0).toUpperCase()}</div>`}
+                              <a href="/admin/users?user=${esc(mIdStr)}" class="row-link">${esc(m.fullName)}</a>
                             </div>
                           </td>
                           <td class="text-muted">${esc(m.email)}</td>
@@ -223,7 +223,7 @@
                   <tbody>
                     ${suggestions.map(s => {
                       const suggester = s.suggestedBy && s.suggestedBy.fullName
-                        ? esc(s.suggestedBy.fullName)
+                        ? `<a href="/admin/users?user=${esc(s.suggestedBy._id)}" class="row-link">${esc(s.suggestedBy.fullName)}</a>`
                         : '<span class="text-muted">Unknown</span>';
                       const meal = esc(s.recipeTitle || s.freeformText || 'Untitled');
                       const slotRaw = (s.mealSlot || '').toString();
@@ -259,7 +259,7 @@
           ? `<div class="detail-section">
               <h4>Photo</h4>
               <div style="display: flex; gap: 12px; align-items: flex-start;">
-                <img src="${esc(k.photo)}" alt="Kitchen photo" style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color, #e5e7eb);">
+                <img src="${esc(k.photo)}" alt="Kitchen photo" style="width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color, #e5e7eb);" onerror="this.remove()">
                 <button class="btn btn-sm btn-danger-outline" onclick="removeKitchenPhoto('${esc(k._id)}')" aria-label="Remove kitchen photo">
                   Remove photo
                 </button>
@@ -272,7 +272,7 @@
             <div class="detail-section">
               <h4>Kitchen Info</h4>
               <div class="detail-row"><span>Name:</span> <span>${esc(k.name)}</span></div>
-              <div class="detail-row"><span>Lead:</span> <span>${k.leadId && k.leadId.fullName ? esc(k.leadId.fullName) : 'Unknown'}</span></div>
+              <div class="detail-row"><span>Lead:</span> <span>${k.leadId && k.leadId.fullName ? `<a href="/admin/users?user=${esc(leadIdStr)}" class="row-link">${esc(k.leadId.fullName)}</a>` : 'Unknown'}</span></div>
               <div class="detail-row"><span>Invite Code:</span> <span><code>${esc(k.inviteCode)}</code></span></div>
               <div class="detail-row"><span>Member Count:</span> <span>${Number(k.memberCount) || 0}</span></div>
               <div class="detail-row"><span>Schedule Policy:</span> <span>${esc(policyLabel)}</span></div>

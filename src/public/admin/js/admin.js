@@ -9,6 +9,130 @@ document.getElementById('sidebar-overlay')?.addEventListener('click', function (
   this.classList.remove('open');
 });
 
+// ── Sidebar Resize / Collapse ───────────────────────────────
+(function () {
+  var MIN_WIDTH = 180;
+  var MAX_WIDTH = 460;
+  var DEFAULT_WIDTH = 260;
+  var COLLAPSE_BELOW = 120;
+  var STEP = 20;
+
+  var root = document.documentElement;
+  var resizer = document.getElementById('sidebar-resizer');
+  var collapseBtn = document.getElementById('sidebar-toggle');
+  var restoreBtn = document.getElementById('sidebar-restore');
+  if (!resizer) return;
+
+  function isCollapsed() {
+    return root.classList.contains('sidebar-collapsed');
+  }
+
+  function currentWidth() {
+    var stored = parseInt(getComputedStyle(root).getPropertyValue('--sidebar-width-expanded'), 10);
+    return stored > 0 ? stored : DEFAULT_WIDTH;
+  }
+
+  function store(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+  }
+
+  function applyWidth(px) {
+    root.style.setProperty('--sidebar-width-expanded', Math.round(px) + 'px');
+  }
+
+  function setCollapsed(collapsed) {
+    root.classList.toggle('sidebar-collapsed', collapsed);
+    store('adminSidebarCollapsed', collapsed ? '1' : '0');
+    if (collapseBtn) collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (restoreBtn) restoreBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+
+  function resizeTo(px, persist) {
+    var width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, px));
+    applyWidth(width);
+    if (persist) store('adminSidebarWidth', String(Math.round(width)));
+    return width;
+  }
+
+  var dragging = false;
+
+  resizer.addEventListener('pointerdown', function (e) {
+    if (window.innerWidth <= 768 || e.button !== 0) return;
+    dragging = true;
+    try { resizer.setPointerCapture(e.pointerId); } catch (err) {}
+    resizer.classList.add('dragging');
+    root.classList.add('sidebar-resizing');
+    e.preventDefault();
+  });
+
+  resizer.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    if (e.clientX < COLLAPSE_BELOW) {
+      if (!isCollapsed()) setCollapsed(true);
+      return;
+    }
+    if (isCollapsed()) setCollapsed(false);
+    resizeTo(e.clientX, false);
+  });
+
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('dragging');
+    root.classList.remove('sidebar-resizing');
+    try { resizer.releasePointerCapture(e.pointerId); } catch (err) {}
+    if (!isCollapsed()) store('adminSidebarWidth', String(currentWidth()));
+  }
+
+  resizer.addEventListener('pointerup', endDrag);
+  resizer.addEventListener('pointercancel', endDrag);
+
+  resizer.addEventListener('dblclick', function () {
+    setCollapsed(false);
+    resizeTo(DEFAULT_WIDTH, true);
+  });
+
+  resizer.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      var delta = e.key === 'ArrowLeft' ? -STEP : STEP;
+      if (isCollapsed()) {
+        if (delta < 0) return;
+        setCollapsed(false);
+        resizeTo(MIN_WIDTH, true);
+        return;
+      }
+      var next = currentWidth() + delta;
+      if (next < MIN_WIDTH) {
+        setCollapsed(true);
+        return;
+      }
+      resizeTo(next, true);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setCollapsed(!isCollapsed());
+    }
+  });
+
+  if (collapseBtn) {
+    collapseBtn.setAttribute('aria-expanded', isCollapsed() ? 'false' : 'true');
+    collapseBtn.addEventListener('click', function () {
+      setCollapsed(true);
+    });
+  }
+
+  if (restoreBtn) {
+    restoreBtn.addEventListener('click', function () {
+      setCollapsed(false);
+      if (currentWidth() < MIN_WIDTH) resizeTo(DEFAULT_WIDTH, true);
+      var first = document.querySelector('.sidebar-nav .nav-item');
+      if (first) first.focus();
+    });
+  }
+})();
+
 // ── Modal Helpers ───────────────────────────────────────────
 function openModal(id) {
   var modal = document.getElementById(id);
@@ -154,6 +278,22 @@ function esc(str) {
   var div = document.createElement('div');
   div.appendChild(document.createTextNode(String(str)));
   return div.innerHTML;
+}
+
+// ── Broken image fallbacks ──────────────────────────────────
+function thumbFallback(img) {
+  var box = document.createElement('div');
+  box.className = 'recipe-thumb recipe-thumb-placeholder';
+  box.title = 'Photo unavailable';
+  img.replaceWith(box);
+}
+
+function avatarFallback(img, initial) {
+  var box = document.createElement('div');
+  box.className = img.className + ' avatar-placeholder';
+  box.title = 'Photo unavailable';
+  box.textContent = (initial || '?').charAt(0).toUpperCase();
+  img.replaceWith(box);
 }
 
 // ── CSRF Token ─────────────────────────────────────────────

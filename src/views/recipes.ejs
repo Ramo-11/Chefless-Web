@@ -60,14 +60,20 @@
           <td>
             <div class="recipe-cell">
               <% if (recipe.photos && recipe.photos.length > 0) { %>
-                <img src="<%= recipe.photos[0] %>" alt="" class="recipe-thumb">
+                <img src="<%= recipe.photos[0] %>" alt="" class="recipe-thumb" onerror="thumbFallback(this)">
               <% } else { %>
                 <div class="recipe-thumb recipe-thumb-placeholder" title="No photo"></div>
               <% } %>
-              <span class="recipe-title"><%= recipe.title %></span>
+              <button type="button" class="row-link recipe-title" data-id="<%= recipe._id %>" onclick="viewRecipe(this.dataset.id)" title="<%= recipe.title %>"><%= recipe.title %></button>
             </div>
           </td>
-          <td class="text-muted"><%= recipe.authorId ? recipe.authorId.fullName : 'Unknown' %></td>
+          <td>
+            <% if (recipe.authorId && recipe.authorId._id) { %>
+              <a href="/admin/users?user=<%= recipe.authorId._id %>" class="row-link row-link-muted"><%= recipe.authorId.fullName %></a>
+            <% } else { %>
+              <span class="text-muted">Unknown</span>
+            <% } %>
+          </td>
           <td>
             <% if (recipe.reportsCount > 0) { %>
               <span class="badge badge-danger"><%= recipe.reportsCount %> reports</span>
@@ -226,9 +232,9 @@
         const author = r.authorId || {};
         document.getElementById('recipe-detail-body').innerHTML = `
           <div class="detail-grid">
-            ${r.photos?.length ? `<div class="recipe-photos">${r.photos.map(p => `<img src="${esc(p)}" alt="" class="recipe-photo">`).join('')}</div>` : ''}
+            ${r.photos?.length ? `<div class="recipe-photos">${r.photos.map(p => `<img src="${esc(p)}" alt="" class="recipe-photo" onerror="this.remove()">`).join('')}</div>` : ''}
             <h3>${esc(r.title)}</h3>
-            <p class="text-muted">by ${esc(author.fullName || 'Unknown')} (${esc(author.email || '')})</p>
+            <p class="text-muted">by ${author._id ? `<a href="/admin/users?user=${esc(author._id)}" class="row-link row-link-muted">${esc(author.fullName || 'Unknown')}</a>` : esc(author.fullName || 'Unknown')} ${author.email ? `(${esc(author.email)})` : ''}</p>
             ${r.description ? `<p>${esc(r.description)}</p>` : ''}
             <div class="detail-section">
               <h4>Stats</h4>

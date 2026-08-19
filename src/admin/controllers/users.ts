@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { isValidObjectId } from "mongoose";
 import User from "../../models/User";
 import AuditLog from "../../models/AuditLog";
 import { logger } from "../../lib/logger";
@@ -31,9 +32,19 @@ export async function usersPage(req: Request, res: Response): Promise<void> {
     const search = (req.query.search as string) || "";
     const filter = (req.query.filter as string) || "all";
 
+    const requestedUser = req.query.user;
+    const focusUserId =
+      typeof requestedUser === "string" && isValidObjectId(requestedUser)
+        ? requestedUser
+        : "";
+
     const query: Record<string, unknown> = {};
 
-    if (search) {
+    if (focusUserId) {
+      query._id = focusUserId;
+    }
+
+    if (search && !focusUserId) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
         { fullName: { $regex: escaped, $options: "i" } },
@@ -41,12 +52,14 @@ export async function usersPage(req: Request, res: Response): Promise<void> {
       ];
     }
 
-    if (filter === "premium") query.isPremium = true;
-    if (filter === "banned") query.isBanned = true;
-    if (filter === "admin") query.isAdmin = true;
-    if (filter === "ios") query.lastKnownPlatform = "ios";
-    if (filter === "android") query.lastKnownPlatform = "android";
-    if (filter === "unknown_device") query.lastKnownPlatform = { $exists: false };
+    if (!focusUserId) {
+      if (filter === "premium") query.isPremium = true;
+      if (filter === "banned") query.isBanned = true;
+      if (filter === "admin") query.isAdmin = true;
+      if (filter === "ios") query.lastKnownPlatform = "ios";
+      if (filter === "android") query.lastKnownPlatform = "android";
+      if (filter === "unknown_device") query.lastKnownPlatform = { $exists: false };
+    }
 
     const skip = (page - 1) * limit;
 
@@ -70,6 +83,7 @@ export async function usersPage(req: Request, res: Response): Promise<void> {
       pagination: { current: page, total: totalPages, totalItems: total },
       search,
       filter,
+      focusUserId,
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to load users page");

@@ -110,13 +110,13 @@
           <td>
             <div class="user-cell">
               <% if (user.profilePicture) { %>
-                <img src="<%= user.profilePicture %>" alt="" class="avatar-sm">
+                <img src="<%= user.profilePicture %>" alt="" class="avatar-sm" data-initial="<%= user.fullName.charAt(0).toUpperCase() %>" onerror="avatarFallback(this, this.dataset.initial)">
               <% } else { %>
                 <div class="avatar-sm avatar-placeholder">
                   <%= user.fullName.charAt(0).toUpperCase() %>
                 </div>
               <% } %>
-              <span><%= user.fullName %></span>
+              <a href="/admin/users?user=<%= user._id %>" class="row-link"><%= user.fullName %></a>
             </div>
           </td>
           <td class="text-muted"><%= user.email %></td>
