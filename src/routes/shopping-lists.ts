@@ -16,6 +16,7 @@ import {
   updateItem,
   clearCompleted,
   toggleItem,
+  reorderItems,
   generateFromSchedule,
 } from "../services/shopping-list-service";
 
@@ -95,6 +96,14 @@ const updateItemSchema = z.object({
   category: z.string().max(50).trim().nullable().optional(),
   notes: z.string().max(500).trim().nullable().optional(),
   imageUrl: z.string().url().nullable().optional(),
+});
+
+const reorderItemsSchema = z.object({
+  itemIds: z
+    .array(
+      z.string().refine(isValidObjectId, { message: "Invalid item ID format" })
+    )
+    .max(500),
 });
 
 const generateSchema = z.object({
@@ -288,6 +297,23 @@ router.patch(
     const { id, itemId } = req.params as z.infer<typeof itemIdParams>;
     const updates = req.body as z.infer<typeof updateItemSchema>;
     const list = await updateItem(id, userId, itemId, updates);
+
+    res.status(200).json({ list });
+  })
+);
+
+// PATCH /api/shopping-lists/:id/reorder — Rewrite item display order
+router.patch(
+  "/:id/reorder",
+  requireAuth,
+  validate({ params: objectIdParam, body: reorderItemsSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = await resolveUserId(req, res);
+    if (!userId) return;
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const { itemIds } = req.body as z.infer<typeof reorderItemsSchema>;
+    const list = await reorderItems(id, userId, itemIds);
 
     res.status(200).json({ list });
   })

@@ -11,6 +11,7 @@ export interface IShoppingListItem {
   category?: string;
   notes?: string;
   imageUrl?: string;
+  order?: number;
 }
 
 export interface IShoppingList extends Document {
@@ -36,6 +37,7 @@ const shoppingListItemSchema = new Schema<IShoppingListItem>({
   category: { type: String, trim: true },
   notes: { type: String, trim: true, maxlength: 500 },
   imageUrl: { type: String },
+  order: { type: Number },
 });
 
 const shoppingListSchema = new Schema<IShoppingList>(

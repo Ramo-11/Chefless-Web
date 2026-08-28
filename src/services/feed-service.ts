@@ -560,6 +560,9 @@ export async function forYouFeed(
   };
 }
 
+const TRENDING_HALF_LIFE_DAYS = 14;
+const TRENDING_DECAY_RATE = Math.LN2 / TRENDING_HALF_LIFE_DAYS;
+
 /**
  * Trending feed — most-engaged recipes from the last 7 days.
  * Uses aggregation with $lookup to avoid loading all public user IDs.
@@ -572,6 +575,7 @@ export async function trendingFeed(
   const blockExclusionIds = await getBlockExclusionIds(userId);
   const accessiblePrivateIds = await buildAccessiblePrivateIds(userId);
   const skip = (page - 1) * limit;
+  const nowMs = Date.now();
 
   // Rank by engagement across the whole visible catalog rather than a fixed
   // recent window, so the feed is never emptied out as recipes age.
@@ -588,11 +592,35 @@ export async function trendingFeed(
     Recipe.aggregate([
       { $match: baseMatch },
       ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
+      {
+        $addFields: {
+          _ageDays: {
+            $divide: [
+              { $subtract: [new Date(nowMs), "$createdAt"] },
+              1000 * 60 * 60 * 24,
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          _trendScore: {
+            $multiply: [
+              { $add: ["$likesCount", { $multiply: ["$forksCount", 3] }] },
+              { $exp: { $multiply: ["$_ageDays", -TRENDING_DECAY_RATE] } },
+            ],
+          },
+        },
+      },
       // Real (non-seed) recipes rank ahead of seed recipes, then by engagement.
-      { $sort: { isSeed: 1, likesCount: -1, forksCount: -1 } },
+      { $sort: { isSeed: 1, _trendScore: -1 } },
       {
         $facet: {
-          data: [{ $skip: skip }, { $limit: limit }],
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+            { $project: { _ageDays: 0, _trendScore: 0 } },
+          ],
           total: [{ $count: "n" }],
         },
       },

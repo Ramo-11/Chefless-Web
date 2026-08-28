@@ -42,6 +42,7 @@ import passportRouter from "./routes/passport";
 import remixTreeRouter from "./routes/remix-tree";
 import wrappedRouter from "./routes/wrapped";
 import appConfigRouter from "./routes/app-config";
+import publicRouter from "./routes/public";
 
 const app = express();
 
@@ -114,17 +115,30 @@ const corsOriginOption: CorsOptions["origin"] = isProd
     : false
   : true;
 
-app.use(cors({
-  origin: corsOriginOption,
-  methods: ["GET", "POST", "PATCH", "DELETE"],
-  allowedHeaders: [
-    "Authorization",
-    "Content-Type",
-    "X-CSRF-Token",
-    "X-Client-Platform",
-    "X-Idempotency-Key",
-  ],
-  credentials: true,
+const publicRouteOrigins = ["https://chefless.org", "https://www.chefless.org"];
+
+app.use(cors((req, callback) => {
+  if (req.path.startsWith("/api/public/")) {
+    callback(null, {
+      origin: isProd ? publicRouteOrigins : true,
+      methods: ["GET"],
+      credentials: false,
+    });
+    return;
+  }
+
+  callback(null, {
+    origin: corsOriginOption,
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-CSRF-Token",
+      "X-Client-Platform",
+      "X-Idempotency-Key",
+    ],
+    credentials: true,
+  });
 }));
 
 app.use(express.urlencoded({ extended: true }));
@@ -222,6 +236,7 @@ app.use("/api/passport", jsonDefault, ...apiLimiters, passportRouter);
 app.use("/api/remix-tree", jsonDefault, ...apiLimiters, remixTreeRouter);
 app.use("/api/wrapped", jsonDefault, ...apiLimiters, wrappedRouter);
 app.use("/api/app-config", jsonDefault, ...apiLimiters, appConfigRouter);
+app.use("/api/public", jsonDefault, apiReadLimiter, publicRouter);
 
 // ── Error handler (must be last) ────────────────────────────────────
 app.use(errorHandler);

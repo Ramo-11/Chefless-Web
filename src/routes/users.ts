@@ -22,6 +22,7 @@ import {
 } from "../services/user-service";
 import { syncUserPremiumFromRevenueCat } from "../services/revenuecat-service";
 import { getBlockedUserIds } from "../services/block-service";
+import { getSuggestedChefs } from "../services/suggested-chefs-service";
 import { imageDataUri } from "../lib/image-validation";
 
 const router = Router();
@@ -64,6 +65,10 @@ const updateProfileSchema = z
 
 const searchQuerySchema = z.object({
   q: z.string().min(1, "Search query is required").max(100),
+});
+
+const suggestedQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(12),
 });
 
 const paginationSchema = z.object({
@@ -121,6 +126,27 @@ router.get(
     }));
 
     res.status(200).json({ users: results });
+  })
+);
+
+router.get(
+  "/suggested",
+  requireAuth,
+  validate({ query: suggestedQuerySchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ error: "User not found. Please register first." });
+      return;
+    }
+
+    const { limit } = req.query as unknown as z.infer<
+      typeof suggestedQuerySchema
+    >;
+    const chefs = await getSuggestedChefs(new Types.ObjectId(userId), limit);
+
+    res.status(200).json({ chefs });
   })
 );
 

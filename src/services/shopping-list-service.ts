@@ -1,5 +1,8 @@
 import { Types } from "mongoose";
-import ShoppingList, { IShoppingList } from "../models/ShoppingList";
+import ShoppingList, {
+  IShoppingList,
+  IShoppingListItem,
+} from "../models/ShoppingList";
 import ScheduleEntry from "../models/ScheduleEntry";
 import Recipe, { IIngredient } from "../models/Recipe";
 import User from "../models/User";
@@ -207,6 +210,19 @@ async function getUserWithKitchen(
   return user;
 }
 
+function effectiveOrder(item: IShoppingListItem, index: number): number {
+  return typeof item.order === "number" ? item.order : index;
+}
+
+function nextOrder(items: IShoppingListItem[]): number {
+  if (items.length === 0) return 0;
+  const highest = items.reduce(
+    (max, item, index) => Math.max(max, effectiveOrder(item, index)),
+    0
+  );
+  return highest + 1;
+}
+
 async function assertListAccess(
   list: IShoppingList,
   userId: string
@@ -247,13 +263,14 @@ export async function createList(
 
   const listFields: Record<string, unknown> = {
     name: data.name,
-    items: (data.items ?? []).map((item) => ({
+    items: (data.items ?? []).map((item, index) => ({
       name: item.name,
       quantity: item.quantity,
       unit: item.unit,
       category: item.category ?? categorizeIngredient(item.name),
       isChecked: false,
       addedBy: user._id,
+      order: index,
     })),
     generatedFromSchedule: false,
   };
@@ -429,6 +446,7 @@ export async function addItem(
     category: item.category ?? categorizeIngredient(item.name),
     notes: item.notes,
     imageUrl: item.imageUrl,
+    order: nextOrder(list.items),
   };
 
   const updated = await ShoppingList.findByIdAndUpdate(
@@ -595,6 +613,47 @@ export async function toggleItem(
   return updated;
 }
 
+export async function reorderItems(
+  listId: string,
+  userId: string,
+  itemIds: string[]
+): Promise<IShoppingList> {
+  const list = await ShoppingList.findById(listId);
+  if (!list) {
+    throw createError("Shopping list not found", 404);
+  }
+
+  await assertListAccess(list, userId);
+
+  const currentIds = list.items.map((item) => item._id.toString());
+  const requestedIds = new Set(itemIds);
+
+  const isPermutation =
+    itemIds.length === currentIds.length &&
+    requestedIds.size === itemIds.length &&
+    currentIds.every((id) => requestedIds.has(id));
+
+  if (!isPermutation) {
+    throw createError(
+      "The new order must include every item in this list exactly once",
+      400
+    );
+  }
+
+  const positionById = new Map(itemIds.map((id, index) => [id, index]));
+
+  for (const item of list.items) {
+    const position = positionById.get(item._id.toString());
+    if (position !== undefined) {
+      item.order = position;
+    }
+  }
+
+  await list.save();
+
+  return list;
+}
+
 export async function duplicateList(
   listId: string,
   userId: string,
@@ -610,7 +669,7 @@ export async function duplicateList(
   const user = await getUserWithKitchen(userId);
 
   // Duplicate items — reset checked state and assign to current user
-  const duplicatedItems = list.items.map((item) => ({
+  const duplicatedItems = list.items.map((item, index) => ({
     name: item.name,
     quantity: item.quantity,
     unit: item.unit,
@@ -620,6 +679,7 @@ export async function duplicateList(
     category: item.category,
     notes: item.notes,
     imageUrl: item.imageUrl,
+    order: effectiveOrder(item, index),
   }));
 
   const listFields: Record<string, unknown> = {
@@ -800,7 +860,7 @@ export async function generateFromSchedule(
   }
 
   // 6. Build items array
-  const items = Array.from(combinedMap.values()).map((combined) => ({
+  const items = Array.from(combinedMap.values()).map((combined, index) => ({
     name: combined.name,
     quantity: combined.quantity,
     unit: combined.unit,
@@ -808,6 +868,7 @@ export async function generateFromSchedule(
     isChecked: false,
     addedBy: user._id,
     category: combined.category,
+    order: index,
   }));
 
   // 7. Create the shopping list
