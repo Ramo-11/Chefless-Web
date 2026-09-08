@@ -5,11 +5,19 @@ import Notification, {
 } from "../models/Notification";
 import User, { NotificationPreferences } from "../models/User";
 import Recipe from "../models/Recipe";
+import CookedPost from "../models/CookedPost";
+import Comment from "../models/Comment";
 import Kitchen from "../models/Kitchen";
 import ScheduleEntry from "../models/ScheduleEntry";
 import { sendPushNotification } from "../lib/fcm";
 import { logger } from "../lib/logger";
 import { buildPushContent, PushLang } from "../lib/push-content";
+import { isBlocked } from "./block-service";
+
+function truncateText(text: string, max: number): string {
+  const trimmed = text.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max - 3)}...` : trimmed;
+}
 
 // --- Types ---
 
@@ -26,6 +34,8 @@ interface CreateNotificationParams {
   kitchenName?: string;
   scheduleEntryId?: Types.ObjectId;
   inviteId?: Types.ObjectId;
+  commentId?: Types.ObjectId;
+  cookedPostId?: Types.ObjectId;
   /**
    * English fallback push copy. The localized copy is built per-recipient in
    * [createNotification] from the notification `type` + the fields above; these
@@ -42,6 +52,7 @@ interface CreateNotificationParams {
     count?: number;
     regionName?: string;
     ownerName?: string;
+    commentPreview?: string;
   };
 }
 
@@ -67,6 +78,19 @@ function deriveRouteForType(params: CreateNotificationParams): string | null {
     case "recipe_shared":
     case "recipe_cooked":
       return params.recipeId ? `/recipe/${params.recipeId}` : null;
+    case "recipe_commented":
+    case "cooked_post_commented":
+    case "comment_reply": {
+      const target = params.cookedPostId
+        ? `cooked_post/${params.cookedPostId}`
+        : params.recipeId
+          ? `recipe/${params.recipeId}`
+          : null;
+      if (!target) return "/notifications";
+      return params.commentId
+        ? `/comments/${target}?commentId=${params.commentId}`
+        : `/comments/${target}`;
+    }
     case "cooked_post_removed":
       return params.recipeId ? `/recipe/${params.recipeId}` : "/notifications";
     case "passport_stamp":
@@ -141,6 +165,8 @@ export async function createNotification(
     kitchenName: params.kitchenName,
     scheduleEntryId: params.scheduleEntryId,
     inviteId: params.inviteId,
+    commentId: params.commentId,
+    cookedPostId: params.cookedPostId,
   });
 
   // Resolve the push copy in the recipient's saved language, falling back to
@@ -163,6 +189,7 @@ export async function createNotification(
       count: params.pushArgs?.count,
       regionName: params.pushArgs?.regionName,
       ownerName: params.pushArgs?.ownerName,
+      commentPreview: params.pushArgs?.commentPreview,
     },
     lang
   );
@@ -193,6 +220,12 @@ export async function createNotification(
     }
     if (params.inviteId) {
       pushData.inviteId = params.inviteId.toString();
+    }
+    if (params.commentId) {
+      pushData.commentId = params.commentId.toString();
+    }
+    if (params.cookedPostId) {
+      pushData.cookedPostId = params.cookedPostId.toString();
     }
 
     // Compute a `route` field so the Flutter app can deep-link directly
@@ -946,5 +979,129 @@ export async function notifyCookedPostRemoved(params: {
     pushArgs: { ownerName: params.ownerName },
     pushTitle: "Your cooked-it photo was removed",
     pushBody: body,
+  });
+}
+
+export async function notifyRecipeCommented(
+  commenterId: string,
+  recipeId: string,
+  commentId: string
+): Promise<void> {
+  const recipe = await Recipe.findById(recipeId).select("authorId title").lean();
+  if (!recipe) return;
+  if (commenterId === recipe.authorId.toString()) return;
+  if (await isBlocked(commenterId, recipe.authorId.toString())) return;
+
+  const [actor, comment] = await Promise.all([
+    getActorData(commenterId),
+    Comment.findById(commentId).select("text").lean(),
+  ]);
+  if (!actor || !comment) return;
+
+  const preview = truncateText(comment.text, 80);
+
+  await createNotification({
+    userId: recipe.authorId,
+    type: "recipe_commented",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    recipeId: new Types.ObjectId(recipeId),
+    recipeTitle: recipe.title,
+    commentId: new Types.ObjectId(commentId),
+    pushTitle: "New comment",
+    pushBody: `${actor.fullName} commented on your recipe "${recipe.title}": ${preview}`,
+    pushArgs: { commentPreview: preview },
+  });
+}
+
+export async function notifyCookedPostCommented(
+  commenterId: string,
+  cookedPostId: string,
+  commentId: string
+): Promise<void> {
+  const post = await CookedPost.findById(cookedPostId)
+    .select("userId recipeId recipeTitle")
+    .lean();
+  if (!post) return;
+  if (commenterId === post.userId.toString()) return;
+  if (await isBlocked(commenterId, post.userId.toString())) return;
+
+  const [actor, comment] = await Promise.all([
+    getActorData(commenterId),
+    Comment.findById(commentId).select("text").lean(),
+  ]);
+  if (!actor || !comment) return;
+
+  const preview = truncateText(comment.text, 80);
+
+  await createNotification({
+    userId: post.userId,
+    type: "cooked_post_commented",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    recipeId: post.recipeId ?? undefined,
+    recipeTitle: post.recipeTitle,
+    cookedPostId: post._id,
+    commentId: new Types.ObjectId(commentId),
+    pushTitle: "New comment",
+    pushBody: `${actor.fullName} commented on your photo of "${post.recipeTitle}": ${preview}`,
+    pushArgs: { commentPreview: preview },
+  });
+}
+
+export async function notifyCommentReplied(
+  replierId: string,
+  parentCommentId: string,
+  replyId: string
+): Promise<void> {
+  const parent = await Comment.findById(parentCommentId)
+    .select("authorId targetType targetId")
+    .lean();
+  if (!parent) return;
+  if (replierId === parent.authorId.toString()) return;
+  if (await isBlocked(replierId, parent.authorId.toString())) return;
+
+  const [actor, reply] = await Promise.all([
+    getActorData(replierId),
+    Comment.findById(replyId).select("text").lean(),
+  ]);
+  if (!actor || !reply) return;
+
+  const preview = truncateText(reply.text, 80);
+
+  let recipeId: Types.ObjectId | undefined;
+  let recipeTitle: string | undefined;
+  let cookedPostId: Types.ObjectId | undefined;
+
+  if (parent.targetType === "recipe") {
+    const recipe = await Recipe.findById(parent.targetId).select("title").lean();
+    recipeId = parent.targetId;
+    recipeTitle = recipe?.title;
+  } else {
+    const post = await CookedPost.findById(parent.targetId)
+      .select("recipeId recipeTitle")
+      .lean();
+    if (post) {
+      cookedPostId = post._id;
+      recipeId = post.recipeId ?? undefined;
+      recipeTitle = post.recipeTitle;
+    }
+  }
+
+  await createNotification({
+    userId: parent.authorId,
+    type: "comment_reply",
+    actorId: actor._id,
+    actorName: actor.fullName,
+    actorPhoto: actor.profilePicture,
+    recipeId,
+    recipeTitle,
+    cookedPostId,
+    commentId: new Types.ObjectId(parentCommentId),
+    pushTitle: "New reply",
+    pushBody: `${actor.fullName} replied to your comment: ${preview}`,
+    pushArgs: { commentPreview: preview },
   });
 }

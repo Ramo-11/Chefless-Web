@@ -43,7 +43,7 @@ const clientErrorSchema = new Schema<IClientError>(
     // Hash of (platform + appVersion + source + first 2 lines of exception)
     // so the same crash on the same build collapses into one row with a
     // bumped occurrences counter instead of N duplicate rows.
-    fingerprint: { type: String, required: true, index: true },
+    fingerprint: { type: String, required: true },
     platform: {
       type: String,
       enum: ["ios", "android", "web"],

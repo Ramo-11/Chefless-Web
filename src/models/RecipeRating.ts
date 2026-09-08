@@ -32,7 +32,6 @@ const recipeRatingSchema = new Schema<IRecipeRating>(
       type: Schema.Types.ObjectId,
       ref: "Recipe",
       required: true,
-      index: true,
     },
     userId: {
       type: Schema.Types.ObjectId,

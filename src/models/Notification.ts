@@ -8,6 +8,9 @@ export const NOTIFICATION_TYPES = [
   "recipe_forked",
   "recipe_saved",
   "recipe_shared",
+  "recipe_commented",
+  "comment_reply",
+  "cooked_post_commented",
   "schedule_suggestion",
   "suggestion_approved",
   "suggestion_denied",
@@ -43,6 +46,8 @@ export interface INotification extends Document {
   /** Set on `kitchen_invite_received` so the tile can render inline
    *  Accept/Decline buttons. */
   inviteId?: Types.ObjectId;
+  commentId?: Types.ObjectId;
+  cookedPostId?: Types.ObjectId;
   isRead: boolean;
   createdAt: Date;
 }
@@ -68,6 +73,7 @@ const notificationSchema = new Schema<INotification>(
     recipeId: {
       type: Schema.Types.ObjectId,
       ref: "Recipe",
+      index: true,
     },
     recipeTitle: { type: String, trim: true },
     shareMessage: { type: String, trim: true, maxlength: 500 },
@@ -84,6 +90,14 @@ const notificationSchema = new Schema<INotification>(
       type: Schema.Types.ObjectId,
       ref: "KitchenInvite",
     },
+    commentId: {
+      type: Schema.Types.ObjectId,
+      ref: "Comment",
+    },
+    cookedPostId: {
+      type: Schema.Types.ObjectId,
+      ref: "CookedPost",
+    },
     isRead: {
       type: Boolean,
       default: false,
@@ -96,12 +110,6 @@ const notificationSchema = new Schema<INotification>(
 
 // Compound index for fetching user's notifications: unread first, then by date
 notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
-
-// For counting unread
-notificationSchema.index({ userId: 1 });
-
-// Pagination index
-notificationSchema.index({ userId: 1, createdAt: -1 });
 
 // TTL: auto-delete notifications older than 90 days
 notificationSchema.index(

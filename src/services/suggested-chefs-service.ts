@@ -43,6 +43,21 @@ interface CandidateAggregateRow {
   _score: number;
 }
 
+function recentRecipesSubPipeline(projectFields: Record<string, 1>): any[] {
+  return [
+    {
+      $match: {
+        $expr: { $eq: ["$authorId", "$$authorId"] },
+        isPrivate: false,
+        isHidden: { $ne: true },
+      },
+    },
+    { $sort: { createdAt: -1 } },
+    { $limit: RECENT_RECIPE_SAMPLE },
+    { $project: projectFields },
+  ];
+}
+
 function hashToUnitFloat(a: string, b: string): number {
   let hash = 2166136261;
   const input = `${a}:${b}`;
@@ -83,41 +98,12 @@ export async function getSuggestedChefs(
       $lookup: {
         from: "recipes",
         let: { authorId: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$authorId", "$$authorId"] },
-              isPrivate: false,
-              isHidden: { $ne: true },
-            },
-          },
-          { $sort: { createdAt: -1 } },
-          { $limit: RECENT_RECIPE_SAMPLE },
-          { $project: { photos: 1, cuisineTags: 1 } },
-        ],
+        pipeline: recentRecipesSubPipeline({ cuisineTags: 1 }),
         as: "_recentRecipes",
       },
     },
     {
       $addFields: {
-        _thumbnails: {
-          $slice: [
-            {
-              $filter: {
-                input: {
-                  $map: {
-                    input: "$_recentRecipes",
-                    as: "r",
-                    in: { $arrayElemAt: ["$$r.photos", 0] },
-                  },
-                },
-                as: "photo",
-                cond: { $ne: ["$$photo", null] },
-              },
-            },
-            THUMBNAIL_COUNT,
-          ],
-        },
         _allCuisineTags: {
           $reduce: {
             input: "$_recentRecipes.cuisineTags",
@@ -165,6 +151,36 @@ export async function getSuggestedChefs(
     },
     { $sort: { _score: -1, followersCount: -1, _id: 1 } },
     { $limit: poolSize },
+    {
+      $lookup: {
+        from: "recipes",
+        let: { authorId: "$_id" },
+        pipeline: recentRecipesSubPipeline({ photos: 1 }),
+        as: "_thumbnailRecipes",
+      },
+    },
+    {
+      $addFields: {
+        _thumbnails: {
+          $slice: [
+            {
+              $filter: {
+                input: {
+                  $map: {
+                    input: "$_thumbnailRecipes",
+                    as: "r",
+                    in: { $arrayElemAt: ["$$r.photos", 0] },
+                  },
+                },
+                as: "photo",
+                cond: { $ne: ["$$photo", null] },
+              },
+            },
+            THUMBNAIL_COUNT,
+          ],
+        },
+      },
+    },
     {
       $project: {
         fullName: 1,

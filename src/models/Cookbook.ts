@@ -19,7 +19,6 @@ const cookbookSchema = new Schema<ICookbook>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     name: {
       type: String,
@@ -39,6 +38,10 @@ const cookbookSchema = new Schema<ICookbook>(
     recipeIds: {
       type: [{ type: Schema.Types.ObjectId, ref: "Recipe" }],
       default: [],
+      validate: {
+        validator: (val: Types.ObjectId[]) => val.length <= 500,
+        message: "A cookbook can hold at most 500 recipes",
+      },
     },
     isPrivate: {
       type: Boolean,

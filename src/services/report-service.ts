@@ -1,11 +1,12 @@
 import { Types } from "mongoose";
-import Report, { ReportReason, ReportStatus } from "../models/Report";
+import Report, { ReportReason, ReportStatus, ReportTargetType } from "../models/Report";
 import Recipe from "../models/Recipe";
 import User from "../models/User";
+import Comment from "../models/Comment";
 
 interface CreateReportInput {
   reporterId: string;
-  targetType: "recipe" | "user";
+  targetType: ReportTargetType;
   targetId: string;
   reason: ReportReason;
   description?: string;
@@ -13,7 +14,7 @@ interface CreateReportInput {
 
 interface ReportFilters {
   status?: ReportStatus;
-  targetType?: "recipe" | "user";
+  targetType?: ReportTargetType;
   page: number;
   limit: number;
 }
@@ -36,6 +37,14 @@ export async function createReport(input: CreateReportInput) {
     if (!user) throw Object.assign(new Error("User not found"), { statusCode: 404 });
     if (user._id.toString() === reporterId) {
       throw Object.assign(new Error("You cannot report yourself"), { statusCode: 400 });
+    }
+  } else if (targetType === "comment") {
+    const comment = await Comment.findById(targetId).lean();
+    if (!comment || comment.isDeleted) {
+      throw Object.assign(new Error("Comment not found"), { statusCode: 404 });
+    }
+    if (comment.authorId.toString() === reporterId) {
+      throw Object.assign(new Error("You cannot report your own comment"), { statusCode: 400 });
     }
   }
 
@@ -79,6 +88,8 @@ export async function createReport(input: CreateReportInput) {
   // Increment reports count on recipe
   if (targetType === "recipe") {
     await Recipe.findByIdAndUpdate(targetId, { $inc: { reportsCount: 1 } });
+  } else if (targetType === "comment") {
+    await Comment.findByIdAndUpdate(targetId, { $inc: { reportsCount: 1 } });
   }
 
   return report;
@@ -122,6 +133,10 @@ export async function getReportById(id: string): Promise<Record<string, unknown>
   } else if (report.targetType === "user") {
     target = await User.findById(report.targetId)
       .select("fullName email profilePicture isBanned")
+      .lean();
+  } else if (report.targetType === "comment") {
+    target = await Comment.findById(report.targetId)
+      .populate("authorId", "fullName email")
       .lean();
   }
 

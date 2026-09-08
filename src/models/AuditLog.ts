@@ -14,7 +14,7 @@ export interface IAuditLog extends Document {
 
 const auditLogSchema = new Schema<IAuditLog>(
   {
-    adminId: { type: String, required: true, index: true },
+    adminId: { type: String, required: true },
     adminEmail: { type: String, required: true },
     action: { type: String, required: true },
     targetType: { type: String, required: true },

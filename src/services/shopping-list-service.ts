@@ -7,6 +7,7 @@ import ScheduleEntry from "../models/ScheduleEntry";
 import Recipe, { IIngredient } from "../models/Recipe";
 import User from "../models/User";
 import { deleteImage, publicIdFromUrl } from "../lib/cloudinary";
+import { categorizeIngredient, normalizeIngredientKey } from "../lib/ingredients";
 
 interface ServiceError extends Error {
   statusCode: number;
@@ -16,186 +17,6 @@ function createError(message: string, statusCode: number): ServiceError {
   const error = new Error(message) as ServiceError;
   error.statusCode = statusCode;
   return error;
-}
-
-// --- Ingredient Category Mapping ---
-
-const INGREDIENT_CATEGORY_MAP: Record<string, string> = {
-  // Meat & Poultry
-  chicken: "Meat",
-  beef: "Meat",
-  lamb: "Meat",
-  pork: "Meat",
-  turkey: "Meat",
-  steak: "Meat",
-  sausage: "Meat",
-  bacon: "Meat",
-  "ground beef": "Meat",
-  "ground turkey": "Meat",
-  "ground chicken": "Meat",
-  veal: "Meat",
-  duck: "Meat",
-
-  // Seafood
-  salmon: "Seafood",
-  shrimp: "Seafood",
-  tuna: "Seafood",
-  cod: "Seafood",
-  tilapia: "Seafood",
-  crab: "Seafood",
-  lobster: "Seafood",
-  fish: "Seafood",
-  prawns: "Seafood",
-
-  // Dairy
-  milk: "Dairy",
-  cheese: "Dairy",
-  butter: "Dairy",
-  cream: "Dairy",
-  yogurt: "Dairy",
-  "sour cream": "Dairy",
-  "cream cheese": "Dairy",
-  mozzarella: "Dairy",
-  parmesan: "Dairy",
-  cheddar: "Dairy",
-  eggs: "Dairy",
-  egg: "Dairy",
-  "heavy cream": "Dairy",
-  "whipping cream": "Dairy",
-
-  // Produce
-  onion: "Produce",
-  onions: "Produce",
-  tomato: "Produce",
-  tomatoes: "Produce",
-  lettuce: "Produce",
-  spinach: "Produce",
-  garlic: "Produce",
-  ginger: "Produce",
-  carrot: "Produce",
-  carrots: "Produce",
-  potato: "Produce",
-  potatoes: "Produce",
-  pepper: "Produce",
-  peppers: "Produce",
-  "bell pepper": "Produce",
-  cucumber: "Produce",
-  broccoli: "Produce",
-  celery: "Produce",
-  mushroom: "Produce",
-  mushrooms: "Produce",
-  avocado: "Produce",
-  lemon: "Produce",
-  lime: "Produce",
-  corn: "Produce",
-  zucchini: "Produce",
-  cabbage: "Produce",
-  kale: "Produce",
-  cilantro: "Produce",
-  parsley: "Produce",
-  basil: "Produce",
-  mint: "Produce",
-  "green onion": "Produce",
-  "green onions": "Produce",
-  scallions: "Produce",
-  jalapeño: "Produce",
-  jalapeno: "Produce",
-  banana: "Produce",
-  apple: "Produce",
-  orange: "Produce",
-  berries: "Produce",
-  strawberries: "Produce",
-  blueberries: "Produce",
-
-  // Pantry
-  flour: "Pantry",
-  sugar: "Pantry",
-  oil: "Pantry",
-  "olive oil": "Pantry",
-  "vegetable oil": "Pantry",
-  "coconut oil": "Pantry",
-  salt: "Pantry",
-  "black pepper": "Pantry",
-  vinegar: "Pantry",
-  "soy sauce": "Pantry",
-  rice: "Pantry",
-  pasta: "Pantry",
-  noodles: "Pantry",
-  "baking powder": "Pantry",
-  "baking soda": "Pantry",
-  vanilla: "Pantry",
-  "vanilla extract": "Pantry",
-  honey: "Pantry",
-  "maple syrup": "Pantry",
-  "tomato paste": "Pantry",
-  "tomato sauce": "Pantry",
-  broth: "Pantry",
-  "chicken broth": "Pantry",
-  "beef broth": "Pantry",
-  stock: "Pantry",
-  "bread crumbs": "Pantry",
-  breadcrumbs: "Pantry",
-  cornstarch: "Pantry",
-
-  // Spices
-  cumin: "Spices",
-  paprika: "Spices",
-  "chili powder": "Spices",
-  oregano: "Spices",
-  thyme: "Spices",
-  rosemary: "Spices",
-  cinnamon: "Spices",
-  nutmeg: "Spices",
-  turmeric: "Spices",
-  cayenne: "Spices",
-  "garlic powder": "Spices",
-  "onion powder": "Spices",
-  "bay leaf": "Spices",
-  "bay leaves": "Spices",
-  cloves: "Spices",
-  coriander: "Spices",
-
-  // Bakery & Bread
-  bread: "Bakery",
-  tortilla: "Bakery",
-  tortillas: "Bakery",
-  pita: "Bakery",
-  buns: "Bakery",
-  rolls: "Bakery",
-
-  // Canned & Jarred
-  "canned tomatoes": "Canned",
-  "diced tomatoes": "Canned",
-  "crushed tomatoes": "Canned",
-  "canned beans": "Canned",
-  "black beans": "Canned",
-  "kidney beans": "Canned",
-  chickpeas: "Canned",
-  lentils: "Canned",
-  "coconut milk": "Canned",
-
-  // Frozen
-  "frozen peas": "Frozen",
-  "frozen corn": "Frozen",
-  "frozen berries": "Frozen",
-};
-
-function categorizeIngredient(name: string): string {
-  const lower = name.toLowerCase().trim();
-
-  // Direct match
-  if (INGREDIENT_CATEGORY_MAP[lower]) {
-    return INGREDIENT_CATEGORY_MAP[lower];
-  }
-
-  // Partial match — check if the ingredient name contains a known keyword
-  for (const [keyword, category] of Object.entries(INGREDIENT_CATEGORY_MAP)) {
-    if (lower.includes(keyword) || keyword.includes(lower)) {
-      return category;
-    }
-  }
-
-  return "Other";
 }
 
 // --- Permission helpers ---
@@ -460,6 +281,83 @@ export async function addItem(
   }
 
   return updated;
+}
+
+export async function addItems(
+  listId: string,
+  userId: string,
+  items: AddItemData[]
+): Promise<IShoppingList> {
+  const list = await ShoppingList.findById(listId);
+  if (!list) {
+    throw createError("Shopping list not found", 404);
+  }
+
+  await assertListAccess(list, userId);
+
+  const MAX_ITEMS = 500;
+  if (list.items.length + items.length > MAX_ITEMS) {
+    throw createError(`Shopping lists are limited to ${MAX_ITEMS} items.`, 400);
+  }
+
+  const existingByKey = new Map<string, number>();
+  list.items.forEach((item, index) => {
+    existingByKey.set(itemMergeKey(item.name, item.unit), index);
+  });
+
+  const additions: Record<string, unknown>[] = [];
+  const increments: Record<string, number> = {};
+  let order = nextOrder(list.items);
+
+  for (const item of items) {
+    const key = itemMergeKey(item.name, item.unit);
+    const existingIndex = existingByKey.get(key);
+
+    if (
+      existingIndex !== undefined &&
+      typeof item.quantity === "number" &&
+      typeof list.items[existingIndex].quantity === "number"
+    ) {
+      const path = `items.${existingIndex}.quantity`;
+      increments[path] = (increments[path] ?? 0) + item.quantity;
+      continue;
+    }
+
+    additions.push({
+      name: item.name,
+      quantity: item.quantity,
+      unit: item.unit,
+      recipeId: item.recipeId ? new Types.ObjectId(item.recipeId) : undefined,
+      isChecked: false,
+      addedBy: new Types.ObjectId(userId),
+      category: item.category ?? categorizeIngredient(item.name),
+      notes: item.notes,
+      imageUrl: item.imageUrl,
+      order: order++,
+    });
+    existingByKey.set(key, list.items.length + additions.length - 1);
+  }
+
+  const update: Record<string, unknown> = {};
+  if (additions.length > 0) update.$push = { items: { $each: additions } };
+  if (Object.keys(increments).length > 0) update.$inc = increments;
+
+  if (Object.keys(update).length === 0) return list.toObject() as IShoppingList;
+
+  const updated = await ShoppingList.findByIdAndUpdate(listId, update, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!updated) {
+    throw createError("Shopping list not found", 404);
+  }
+
+  return updated;
+}
+
+function itemMergeKey(name: string, unit?: string | null): string {
+  return `${normalizeIngredientKey(name)}|${normalizeIngredientKey(unit ?? "")}`;
 }
 
 export async function removeItem(
@@ -837,8 +735,8 @@ export async function generateFromSchedule(
     const recipeObjectId = new Types.ObjectId(recipeIdStr);
 
     for (const ingredient of recipe.ingredients) {
-      const normalizedName = ingredient.name.toLowerCase().trim();
-      const normalizedUnit = ingredient.unit.toLowerCase().trim();
+      const normalizedName = normalizeIngredientKey(ingredient.name);
+      const normalizedUnit = normalizeIngredientKey(ingredient.unit);
       const key = `${normalizedName}|${normalizedUnit}`;
 
       const existing = combinedMap.get(key);

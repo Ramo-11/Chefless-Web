@@ -80,7 +80,7 @@ describe("Report model", () => {
     await expect(
       Report.create({
         reporterId: new Types.ObjectId(),
-        targetType: "comment",
+        targetType: "kitchen",
         targetId: new Types.ObjectId(),
         reason: "spam",
       })

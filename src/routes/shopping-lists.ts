@@ -12,6 +12,7 @@ import {
   duplicateList,
   uncheckAll,
   addItem,
+  addItems,
   removeItem,
   updateItem,
   clearCompleted,
@@ -87,6 +88,10 @@ const addItemSchema = z.object({
   category: z.string().max(50).trim().optional(),
   notes: z.string().max(500).trim().optional(),
   imageUrl: z.string().url().optional(),
+});
+
+const addItemsSchema = z.object({
+  items: z.array(addItemSchema).min(1).max(200),
 });
 
 const updateItemSchema = z.object({
@@ -248,6 +253,23 @@ router.post(
     const { id } = req.params as z.infer<typeof objectIdParam>;
     const item = req.body as z.infer<typeof addItemSchema>;
     const list = await addItem(id, userId, item);
+
+    res.status(201).json({ list });
+  })
+);
+
+// POST /api/shopping-lists/:id/items/bulk — Add many items at once
+router.post(
+  "/:id/items/bulk",
+  requireAuth,
+  validate({ params: objectIdParam, body: addItemsSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = await resolveUserId(req, res);
+    if (!userId) return;
+
+    const { id } = req.params as z.infer<typeof objectIdParam>;
+    const { items } = req.body as z.infer<typeof addItemsSchema>;
+    const list = await addItems(id, userId, items);
 
     res.status(201).json({ list });
   })

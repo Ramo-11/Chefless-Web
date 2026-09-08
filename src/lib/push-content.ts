@@ -26,6 +26,7 @@ export interface PushContentInput {
   regionName?: string;
   /** cooked_post_removed: the name of the owner who removed the photo. */
   ownerName?: string;
+  commentPreview?: string;
 }
 
 export interface PushContent {
@@ -50,7 +51,62 @@ export function buildPushContent(
     input.kitchenName ??
     pick(lang, "the kitchen", "المطبخ", "mutfak", "la cocina");
 
+  const previewSuffix = input.commentPreview
+    ? `: ${input.commentPreview}`
+    : "";
+
   switch (input.type) {
+    case "recipe_commented":
+      return {
+        title: pick(
+          lang,
+          "New comment",
+          "تعليق جديد",
+          "Yeni yorum",
+          "Nuevo comentario"
+        ),
+        body: pick(
+          lang,
+          `${actor} commented on your recipe "${recipe}"${previewSuffix}`,
+          `علّق ${actor} على وصفتك "${recipe}"${previewSuffix}`,
+          `${actor}, "${recipe}" tarifinize yorum yaptı${previewSuffix}`,
+          `${actor} comentó en tu receta "${recipe}"${previewSuffix}`
+        ),
+      };
+    case "cooked_post_commented":
+      return {
+        title: pick(
+          lang,
+          "New comment",
+          "تعليق جديد",
+          "Yeni yorum",
+          "Nuevo comentario"
+        ),
+        body: pick(
+          lang,
+          `${actor} commented on your photo of "${recipe}"${previewSuffix}`,
+          `علّق ${actor} على صورتك لوصفة "${recipe}"${previewSuffix}`,
+          `${actor}, "${recipe}" fotoğrafınıza yorum yaptı${previewSuffix}`,
+          `${actor} comentó en tu foto de "${recipe}"${previewSuffix}`
+        ),
+      };
+    case "comment_reply":
+      return {
+        title: pick(
+          lang,
+          "New reply",
+          "رد جديد",
+          "Yeni yanıt",
+          "Nueva respuesta"
+        ),
+        body: pick(
+          lang,
+          `${actor} replied to your comment${previewSuffix}`,
+          `رد ${actor} على تعليقك${previewSuffix}`,
+          `${actor} yorumunuzu yanıtladı${previewSuffix}`,
+          `${actor} respondió a tu comentario${previewSuffix}`
+        ),
+      };
     case "new_follower":
       return {
         title: pick(

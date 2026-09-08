@@ -701,6 +701,44 @@ export async function deleteKitchen(userId: string): Promise<void> {
   await Kitchen.findByIdAndDelete(kitchen._id);
 }
 
+async function reserveKitchenSlot(kitchen: IKitchen): Promise<IKitchen> {
+  const lead = await User.findById(kitchen.leadId)
+    .select("isPremium premiumExpiresAt")
+    .lean();
+  if (!lead) {
+    throw createError("Kitchen lead not found", 404);
+  }
+
+  const leadHasPremium =
+    lead.isPremium &&
+    (!lead.premiumExpiresAt || new Date(lead.premiumExpiresAt) > new Date());
+
+  if (leadHasPremium) {
+    const updated = await Kitchen.findByIdAndUpdate(
+      kitchen._id,
+      { $inc: { memberCount: 1 } },
+      { new: true }
+    );
+    if (!updated) {
+      throw createError("Kitchen not found", 404);
+    }
+    return updated;
+  }
+
+  const updated = await Kitchen.findOneAndUpdate(
+    { _id: kitchen._id, memberCount: { $lt: FREE_TIER_MAX_MEMBERS } },
+    { $inc: { memberCount: 1 } },
+    { new: true }
+  );
+  if (!updated) {
+    throw createError(
+      "This kitchen has reached its maximum capacity. The kitchen lead needs to upgrade to premium.",
+      403
+    );
+  }
+  return updated;
+}
+
 export async function joinKitchen(
   userId: string,
   inviteCode: string
@@ -733,34 +771,12 @@ export async function joinKitchen(
     );
   }
 
-  // Check capacity based on lead's premium status
-  const lead = await User.findById(kitchen.leadId).select("isPremium premiumExpiresAt").lean();
-  if (!lead) {
-    throw createError("Kitchen lead not found", 404);
-  }
-
-  const leadHasPremium = lead.isPremium && (!lead.premiumExpiresAt || new Date(lead.premiumExpiresAt) > new Date());
-  if (!leadHasPremium && kitchen.memberCount >= FREE_TIER_MAX_MEMBERS) {
-    throw createError(
-      "This kitchen has reached its maximum capacity. The kitchen lead needs to upgrade to premium.",
-      403
-    );
-  }
+  const updated = await reserveKitchenSlot(kitchen);
 
   await User.updateOne(
     { _id: userId },
     { $set: { kitchenId: kitchen._id } }
   );
-
-  const updated = await Kitchen.findByIdAndUpdate(
-    kitchen._id,
-    { $inc: { memberCount: 1 } },
-    { new: true }
-  );
-
-  if (!updated) {
-    throw createError("Kitchen not found", 404);
-  }
 
   // Passive cleanup: if the user had pending in-app invites to other kitchens
   // (or to this one), mark them as declined. No notifications are sent to the
@@ -1415,22 +1431,13 @@ export async function acceptKitchenInvite(
     throw createError("Kitchen no longer exists", 404);
   }
 
-  await assertKitchenHasCapacity(kitchen);
+  const updatedKitchen = await reserveKitchenSlot(kitchen);
 
   // Move the user into the kitchen and mark the invite accepted.
   await User.updateOne(
     { _id: userId },
     { $set: { kitchenId: kitchen._id } }
   );
-
-  const updatedKitchen = await Kitchen.findByIdAndUpdate(
-    kitchen._id,
-    { $inc: { memberCount: 1 } },
-    { new: true }
-  );
-  if (!updatedKitchen) {
-    throw createError("Kitchen not found", 404);
-  }
 
   invite.status = "accepted";
   await invite.save();

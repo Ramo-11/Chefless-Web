@@ -17,6 +17,7 @@ export async function connectDatabase(): Promise<void> {
       serverSelectionTimeoutMS: 10_000,
       socketTimeoutMS: 45_000,
       maxPoolSize: 20,
+      autoIndex: env.NODE_ENV !== "production",
     });
     logger.info("Connected to MongoDB");
   } catch (error) {

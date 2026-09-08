@@ -37,9 +37,6 @@ followSchema.index({ followerId: 1, followingId: 1 }, { unique: true });
 // For looking up followers of a user filtered by status
 followSchema.index({ followingId: 1, status: 1 });
 
-// For looking up who a user is following
-followSchema.index({ followerId: 1 });
-
 const Follow =
   (mongoose.models.Follow as mongoose.Model<IFollow>) ||
   mongoose.model<IFollow>("Follow", followSchema);

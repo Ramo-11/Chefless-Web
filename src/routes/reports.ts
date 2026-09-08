@@ -16,7 +16,7 @@ const router = Router();
 // ── User-facing: create a report ────────────────────────────────────
 
 const createReportSchema = z.object({
-  targetType: z.enum(["recipe", "user"]),
+  targetType: z.enum(["recipe", "user", "comment"]),
   targetId: z
     .string()
     .refine(mongoose.Types.ObjectId.isValid, { message: "Invalid target ID" }),
@@ -69,7 +69,7 @@ const listReportsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   status: z.enum(["pending", "reviewed", "dismissed", "action_taken"]).optional(),
-  targetType: z.enum(["recipe", "user"]).optional(),
+  targetType: z.enum(["recipe", "user", "comment"]).optional(),
 });
 
 router.get(

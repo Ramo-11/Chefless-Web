@@ -6,9 +6,16 @@ import { validate } from "../middleware/validate";
 import User from "../models/User";
 import Recipe from "../models/Recipe";
 import Kitchen from "../models/Kitchen";
-import Follow from "../models/Follow";
 import { getBlockedUserIds } from "../services/block-service";
+import { buildAccessiblePrivateIds } from "../services/visibility-service";
 import { computeSpatulaBadge } from "../services/user-service";
+import { ALL_KNOWN_CUISINES } from "../lib/cuisines";
+import {
+  buildRecipeSearchStage,
+  isAtlasSearchAvailable,
+  markAtlasSearchUnavailable,
+  RecipeSearchFilters,
+} from "../lib/atlas-search";
 
 const router = Router();
 
@@ -20,33 +27,89 @@ function asyncHandler(
   };
 }
 
-// ── Validation ──────────────────────────────────────────────────────────────
+const CANONICAL_CUISINES = [...ALL_KNOWN_CUISINES].sort();
+
+const CANONICAL_DIETS = [
+  "Halal",
+  "Vegan",
+  "Vegetarian",
+  "Gluten-Free",
+  "Dairy-Free",
+  "Nut-Free",
+  "Keto",
+  "Paleo",
+  "Low FODMAP",
+] as const;
+
+const DIFFICULTIES = ["easy", "medium", "hard"] as const;
+
+const SORTS = ["relevance", "newest", "popular", "rating", "quickest"] as const;
+
+function commaList(maxEntries: number, maxLen: number) {
+  return z
+    .string()
+    .optional()
+    .transform((val) =>
+      val === undefined
+        ? undefined
+        : val
+            .split(",")
+            .map((v) => v.trim())
+            .filter((v) => v.length > 0)
+    )
+    .refine((arr) => arr === undefined || arr.length <= maxEntries, {
+      message: `Maximum ${maxEntries} entries allowed`,
+    })
+    .refine(
+      (arr) => arr === undefined || arr.every((v) => v.length <= maxLen),
+      { message: `Each entry must be at most ${maxLen} characters` }
+    );
+}
 
 const searchQuerySchema = z.object({
-  q: z.string().min(1, "Search query is required").max(100),
+  q: z.string().min(1, "Search query is required").max(100).optional(),
   type: z.enum(["all", "recipes", "users", "kitchens"]).default("all"),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  cuisines: commaList(10, 40),
+  diets: commaList(10, 40),
+  difficulty: z.enum(DIFFICULTIES).optional(),
+  maxTotalTime: z.coerce.number().int().min(1).max(1440).optional(),
+  minRating: z.coerce.number().min(1).max(5).optional(),
+  sort: z.enum(SORTS).default("relevance"),
 });
 
 type SearchQuery = z.infer<typeof searchQuerySchema>;
+type SortOption = SearchQuery["sort"];
 
-// ── Utilities ───────────────────────────────────────────────────────────────
+interface RecipeFilters {
+  cuisines?: string[];
+  diets?: string[];
+  difficulty?: "easy" | "medium" | "hard";
+  maxTotalTime?: number;
+  minRating?: number;
+}
 
-/** Escape regex special characters so user input is treated literally. */
+function hasRecipeFilter(filters: RecipeFilters): boolean {
+  return Boolean(
+    (filters.cuisines && filters.cuisines.length > 0) ||
+      (filters.diets && filters.diets.length > 0) ||
+      filters.difficulty ||
+      filters.maxTotalTime !== undefined ||
+      filters.minRating !== undefined
+  );
+}
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Split a query string into non-empty terms. */
 function parseTerms(query: string): string[] {
   return query
     .trim()
     .split(/\s+/)
     .filter((t) => t.length > 0);
 }
-
-// ── Result Interfaces ───────────────────────────────────────────────────────
 
 interface RecipeSearchResult {
   _id: Types.ObjectId;
@@ -94,60 +157,19 @@ interface KitchenSearchResult {
   };
 }
 
-// ── Visibility ──────────────────────────────────────────────────────────────
-
-/**
- * Returns the bidirectional block exclusion set for the viewer. The
- * block-service helper already unions "users I blocked" with "users who
- * blocked me", so a single call suffices.
- */
 async function getBlockExclusionIds(
   viewerId: Types.ObjectId
 ): Promise<Types.ObjectId[]> {
   return getBlockedUserIds(viewerId.toString());
 }
 
-/**
- * Returns the accessible private author IDs (follows + kitchen members)
- * for the viewer. Does NOT load all public/banned user IDs into memory.
- */
-async function buildAccessiblePrivateIds(
-  viewerId: Types.ObjectId
-): Promise<Types.ObjectId[]> {
-  const follows = await Follow.find({
-    followerId: viewerId,
-    status: "active",
-  })
-    .select("followingId")
-    .lean();
-  const followedIds = follows.map((f) => f.followingId);
-
-  const viewer = await User.findById(viewerId).select("kitchenId").lean();
-  let kitchenMemberIds: Types.ObjectId[] = [];
-  if (viewer?.kitchenId) {
-    const members = await User.find({
-      kitchenId: viewer.kitchenId,
-      _id: { $ne: viewerId },
-    })
-      .select("_id")
-      .lean();
-    kitchenMemberIds = members.map((m) => m._id);
-  }
-
-  return [...followedIds, ...kitchenMemberIds];
-}
-
-/**
- * Returns aggregation pipeline stages that enforce recipe visibility using
- * $lookup on the author document instead of loading all public/banned IDs.
- */
 function buildRecipeVisibilityStages(
   viewerId: Types.ObjectId,
   accessiblePrivateIds: Types.ObjectId[]
 ): Record<string, unknown>[] {
   const orClauses: Record<string, unknown>[] = [
-    { authorId: viewerId }, // own recipes (including private)
-    { isPrivate: false, "_author.isPublic": true }, // public account
+    { authorId: viewerId },
+    { isPrivate: false, "_author.isPublic": true },
   ];
 
   if (accessiblePrivateIds.length > 0) {
@@ -171,7 +193,6 @@ function buildRecipeVisibilityStages(
     {
       $match: {
         "_author.isBanned": { $ne: true },
-        isHidden: { $ne: true },
         $or: orClauses,
       },
     },
@@ -179,108 +200,254 @@ function buildRecipeVisibilityStages(
   ];
 }
 
-// ── Search Functions ────────────────────────────────────────────────────────
+function buildRecipeFilterClauses(
+  filters: RecipeFilters
+): Record<string, unknown>[] {
+  const clauses: Record<string, unknown>[] = [];
+
+  if (filters.cuisines && filters.cuisines.length > 0) {
+    clauses.push({
+      $or: filters.cuisines.map((c) => ({
+        cuisineTags: { $regex: `^${escapeRegex(c)}$`, $options: "i" },
+      })),
+    });
+  }
+
+  if (filters.diets && filters.diets.length > 0) {
+    for (const diet of filters.diets) {
+      clauses.push({
+        dietaryTags: { $regex: `^${escapeRegex(diet)}$`, $options: "i" },
+      });
+    }
+  }
+
+  if (filters.difficulty) {
+    clauses.push({ difficulty: filters.difficulty });
+  }
+
+  if (filters.minRating !== undefined) {
+    clauses.push({
+      avgRating: { $gte: filters.minRating },
+      ratingCount: { $gt: 0 },
+    });
+  }
+
+  return clauses;
+}
+
+function isSetExpr(field: string): Record<string, unknown> {
+  return { $ne: [{ $ifNull: [field, null] }, null] };
+}
+
+const EFFECTIVE_TIME_FIELDS = {
+  _hasTimeInfo: {
+    $or: [
+      isSetExpr("$totalTime"),
+      isSetExpr("$prepTime"),
+      isSetExpr("$cookTime"),
+    ],
+  },
+  _effectiveTime: {
+    $cond: [
+      isSetExpr("$totalTime"),
+      "$totalTime",
+      {
+        $cond: [
+          { $or: [isSetExpr("$prepTime"), isSetExpr("$cookTime")] },
+          {
+            $add: [{ $ifNull: ["$prepTime", 0] }, { $ifNull: ["$cookTime", 0] }],
+          },
+          null,
+        ],
+      },
+    ],
+  },
+};
+
+function buildRecipeSortStage(
+  sort: SortOption,
+  hasQuery: boolean
+): Record<string, 1 | -1> {
+  const effectiveSort = sort === "relevance" && !hasQuery ? "popular" : sort;
+
+  if (effectiveSort === "relevance") {
+    return {
+      isSeed: 1,
+      _relevance: -1,
+      likesCount: -1,
+      createdAt: -1,
+      _id: 1,
+    };
+  }
+  if (effectiveSort === "newest") {
+    return { createdAt: -1, _id: 1 };
+  }
+  if (effectiveSort === "rating") {
+    return { avgRating: -1, ratingCount: -1, _id: 1 };
+  }
+  if (effectiveSort === "quickest") {
+    return { _hasTimeInfo: -1, _effectiveTime: 1, _id: 1 };
+  }
+  return { likesCount: -1, createdAt: -1, _id: 1 };
+}
+
+interface SearchRecipesParams {
+  query: string | undefined;
+  viewerId: Types.ObjectId;
+  page: number;
+  limit: number;
+  blockExclusionIds: Types.ObjectId[];
+  filters: RecipeFilters;
+  sort: SortOption;
+}
 
 async function searchRecipes(
-  query: string,
-  viewerId: Types.ObjectId,
-  page: number,
-  limit: number,
-  blockExclusionIds: Types.ObjectId[]
+  params: SearchRecipesParams
 ): Promise<{ recipes: RecipeSearchResult[]; total: number }> {
-  const terms = parseTerms(query);
-  if (!terms.length) return { recipes: [], total: 0 };
+  const { query, viewerId, page, limit, blockExclusionIds, filters, sort } =
+    params;
+
+  const providedQuery = query !== undefined;
+  let terms: string[] = [];
+  if (providedQuery) {
+    terms = parseTerms(query as string);
+    if (terms.length === 0) {
+      return { recipes: [], total: 0 };
+    }
+  }
+  const hasQuery = providedQuery;
 
   const escapedTerms = terms.map(escapeRegex);
-  const fullQueryEscaped = escapeRegex(query.trim());
+  const fullQueryEscaped = hasQuery ? escapeRegex((query as string).trim()) : "";
 
-  // Every term must match at least one searchable field. Blocked authors
-  // (either direction) are excluded here so nothing they wrote ever enters
-  // the aggregation pipeline.
-  const termFilter: Record<string, unknown> = {
-    $and: escapedTerms.map((term) => ({
-      $or: [
-        { title: { $regex: term, $options: "i" } },
-        { description: { $regex: term, $options: "i" } },
-        { "ingredients.name": { $regex: term, $options: "i" } },
-        { dietaryTags: { $regex: term, $options: "i" } },
-        { cuisineTags: { $regex: term, $options: "i" } },
-      ],
-    })),
+  const atlasSearchFilters: RecipeSearchFilters = {
+    cuisines: filters.cuisines,
+    diets: filters.diets,
+    difficulty: filters.difficulty,
+    minRating: filters.minRating,
   };
-  if (blockExclusionIds.length > 0) {
-    termFilter.authorId = { $nin: blockExclusionIds };
-  }
+  const atlasAvailable = await isAtlasSearchAvailable();
+  const atlasStage = atlasAvailable
+    ? buildRecipeSearchStage({
+        query: hasQuery ? (query as string) : undefined,
+        filters: atlasSearchFilters,
+      })
+    : null;
 
   const accessiblePrivateIds = await buildAccessiblePrivateIds(viewerId);
 
-  const pipeline = [
-    { $match: termFilter },
-    // Enforce visibility via $lookup instead of loading all public user IDs
-    ...buildRecipeVisibilityStages(viewerId, accessiblePrivateIds),
-    // Relevance scoring: title match quality + engagement
-    {
-      $addFields: {
-        _relevance: {
-          $sum: [
-            // Full query appears in title (highest signal)
-            {
-              $cond: [
-                {
-                  $regexMatch: {
-                    input: "$title",
-                    regex: fullQueryEscaped,
-                    options: "i",
-                  },
-                },
-                100,
-                0,
-              ],
-            },
-            // Title starts with the first search term
-            {
-              $cond: [
-                {
-                  $regexMatch: {
-                    input: "$title",
-                    regex: `^${escapedTerms[0]}`,
-                    options: "i",
-                  },
-                },
-                50,
-                0,
-              ],
-            },
-            // Engagement bonus (log-scaled so high-like recipes don't dominate)
-            {
-              $multiply: [
-                {
-                  $ln: {
-                    $add: [{ $add: ["$likesCount", "$forksCount"] }, 2],
-                  },
-                },
-                5,
-              ],
-            },
+  const needsEffectiveTime =
+    filters.maxTotalTime !== undefined || sort === "quickest";
+
+  const useRelevance = sort === "relevance" && hasQuery;
+
+  function buildPipeline(useSearchStage: boolean): Record<string, unknown>[] {
+    const andClauses: Record<string, unknown>[] = [];
+
+    if (hasQuery && !useSearchStage) {
+      andClauses.push(
+        ...escapedTerms.map((term) => ({
+          $or: [
+            { title: { $regex: term, $options: "i" } },
+            { description: { $regex: term, $options: "i" } },
+            { "ingredients.name": { $regex: term, $options: "i" } },
+            { dietaryTags: { $regex: term, $options: "i" } },
+            { cuisineTags: { $regex: term, $options: "i" } },
           ],
+        }))
+      );
+    }
+
+    andClauses.push(...buildRecipeFilterClauses(filters));
+
+    const initialMatch: Record<string, unknown> = { isHidden: { $ne: true } };
+    if (blockExclusionIds.length > 0) {
+      initialMatch.authorId = { $nin: blockExclusionIds };
+    }
+    if (andClauses.length > 0) {
+      initialMatch.$and = andClauses;
+    }
+
+    const pipeline: Record<string, unknown>[] = [];
+    if (useSearchStage && atlasStage) {
+      pipeline.push(atlasStage);
+    }
+    pipeline.push({ $match: initialMatch });
+
+    if (needsEffectiveTime) {
+      pipeline.push({ $addFields: EFFECTIVE_TIME_FIELDS });
+    }
+
+    if (filters.maxTotalTime !== undefined) {
+      pipeline.push({
+        $match: {
+          _effectiveTime: { $ne: null, $lte: filters.maxTotalTime },
         },
-      },
-    },
-    // Real (non-seed) recipes rank ahead of seed recipes, then by relevance.
-    // `isSeed` sorts ascending: missing/false (real) before true (seed).
-    {
-      $sort: {
-        isSeed: 1 as const,
-        _relevance: -1 as const,
-        likesCount: -1 as const,
-        createdAt: -1 as const,
-      },
-    },
-    // Cap documents flowing into facet to prevent memory exhaustion
-    { $limit: Math.min(page * limit, 1000) },
-    {
+      });
+    }
+
+    pipeline.push(
+      ...buildRecipeVisibilityStages(viewerId, accessiblePrivateIds)
+    );
+
+    if (useRelevance) {
+      if (useSearchStage && atlasStage) {
+        pipeline.push({
+          $addFields: { _relevance: { $meta: "searchScore" } },
+        });
+      } else {
+        pipeline.push({
+          $addFields: {
+            _relevance: {
+              $sum: [
+                {
+                  $cond: [
+                    {
+                      $regexMatch: {
+                        input: "$title",
+                        regex: fullQueryEscaped,
+                        options: "i",
+                      },
+                    },
+                    100,
+                    0,
+                  ],
+                },
+                {
+                  $cond: [
+                    {
+                      $regexMatch: {
+                        input: "$title",
+                        regex: `^${escapedTerms[0]}`,
+                        options: "i",
+                      },
+                    },
+                    50,
+                    0,
+                  ],
+                },
+                {
+                  $multiply: [
+                    {
+                      $ln: {
+                        $add: [{ $add: ["$likesCount", "$forksCount"] }, 2],
+                      },
+                    },
+                    5,
+                  ],
+                },
+              ],
+            },
+          },
+        });
+      }
+    }
+
+    pipeline.push({
       $facet: {
         results: [
+          { $sort: buildRecipeSortStage(sort, hasQuery) },
+          { $limit: Math.min(page * limit, 1000) },
           { $skip: (page - 1) * limit },
           { $limit: limit },
           {
@@ -303,27 +470,40 @@ async function searchRecipes(
             },
           },
         ],
-        count: [{ $count: "total" }],
+        count: [{ $limit: 1000 }, { $count: "total" }],
       },
-    },
-  ];
+    });
 
-  const [result] = await Recipe.aggregate(pipeline as unknown as PipelineStage[]);
+    return pipeline;
+  }
+
+  const useAtlasPipeline = Boolean(atlasStage);
+  let pipeline = buildPipeline(useAtlasPipeline);
+  let result: { results: unknown[]; count: Array<{ total?: number }> };
+  try {
+    [result] = await Recipe.aggregate(pipeline as unknown as PipelineStage[]);
+  } catch (err) {
+    if (useAtlasPipeline) {
+      markAtlasSearchUnavailable(err);
+      pipeline = buildPipeline(false);
+      [result] = await Recipe.aggregate(
+        pipeline as unknown as PipelineStage[]
+      );
+    } else {
+      throw err;
+    }
+  }
+
   const recipes = result.results as Array<
     Record<string, unknown> & { authorId: Types.ObjectId }
   >;
   const total = (result.count[0]?.total as number) ?? 0;
 
-  // Populate author info
-  const authorIds = [
-    ...new Set(recipes.map((r) => r.authorId.toString())),
-  ];
+  const authorIds = [...new Set(recipes.map((r) => r.authorId.toString()))];
   const authors = await User.find({ _id: { $in: authorIds } })
     .select("fullName profilePicture")
     .lean();
-  const authorMap = new Map(
-    authors.map((a) => [a._id.toString(), a])
-  );
+  const authorMap = new Map(authors.map((a) => [a._id.toString(), a]));
 
   const results: RecipeSearchResult[] = recipes.map((recipe) => {
     const author = authorMap.get(recipe.authorId.toString());
@@ -367,7 +547,6 @@ async function searchUsers(
   const escapedTerms = terms.map(escapeRegex);
   const fullQueryEscaped = escapeRegex(query.trim());
 
-  // Search by name only — email is a sensitive field and must not be exposed
   const termFilter = {
     $and: escapedTerms.map((term) => ({
       fullName: { $regex: term, $options: "i" },
@@ -393,7 +572,6 @@ async function searchUsers(
       $addFields: {
         _relevance: {
           $sum: [
-            // Full name contains full query
             {
               $cond: [
                 {
@@ -407,7 +585,6 @@ async function searchUsers(
                 0,
               ],
             },
-            // Name starts with first term
             {
               $cond: [
                 {
@@ -421,7 +598,6 @@ async function searchUsers(
                 0,
               ],
             },
-            // Followers bonus
             {
               $multiply: [
                 { $ln: { $add: ["$followersCount", 2] } },
@@ -432,7 +608,6 @@ async function searchUsers(
         },
       },
     },
-    // Real (non-seed) users rank ahead of seed users, then by relevance.
     {
       $sort: {
         isSeed: 1 as const,
@@ -440,7 +615,6 @@ async function searchUsers(
         followersCount: -1 as const,
       },
     },
-    // Cap documents flowing into facet to prevent memory exhaustion
     { $limit: Math.min(page * limit, 1000) },
     {
       $facet: {
@@ -499,14 +673,12 @@ async function searchKitchens(
   const escapedTerms = terms.map(escapeRegex);
   const fullQueryEscaped = escapeRegex(query.trim());
 
-  // Every term must match the kitchen name
   const termFilter = {
     $and: escapedTerms.map((term) => ({
       name: { $regex: term, $options: "i" },
     })),
   };
 
-  // Show public kitchens + kitchens the viewer belongs to
   const viewer = await User.findById(viewerId).select("kitchenId").lean();
 
   const visibilityFilter: Record<string, unknown> = viewer?.kitchenId
@@ -555,7 +727,6 @@ async function searchKitchens(
       },
     },
     { $sort: { _relevance: -1 as const, memberCount: -1 as const } },
-    // Cap documents flowing into facet to prevent memory exhaustion
     { $limit: Math.min(page * limit, 1000) },
     {
       $facet: {
@@ -601,14 +772,36 @@ async function searchKitchens(
   return { kitchens, total };
 }
 
-// ── Route Handler ───────────────────────────────────────────────────────────
+router.get(
+  "/filters",
+  requireAuth,
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.status(200).json({
+      cuisines: CANONICAL_CUISINES,
+      diets: [...CANONICAL_DIETS],
+      difficulties: [...DIFFICULTIES],
+      sorts: [...SORTS],
+    });
+  })
+);
 
 router.get(
   "/",
   requireAuth,
   validate({ query: searchQuerySchema }),
   asyncHandler(async (req: Request, res: Response) => {
-    const { q, type, page, limit } = req.query as unknown as SearchQuery;
+    const {
+      q,
+      type,
+      page,
+      limit,
+      cuisines,
+      diets,
+      difficulty,
+      maxTotalTime,
+      minRating,
+      sort,
+    } = req.query as unknown as SearchQuery;
 
     const userId = req.user?.userId;
     if (!userId) {
@@ -616,11 +809,27 @@ router.get(
       return;
     }
 
+    const filters: RecipeFilters = {
+      cuisines,
+      diets,
+      difficulty,
+      maxTotalTime,
+      minRating,
+    };
+    const browseMode = q === undefined;
+
+    if (
+      browseMode &&
+      (type === "users" || type === "kitchens" || !hasRecipeFilter(filters))
+    ) {
+      res.status(400).json({
+        error: "Provide a search query or at least one recipe filter",
+        code: "SEARCH_EMPTY_QUERY",
+      });
+      return;
+    }
+
     const viewerId = new Types.ObjectId(userId);
-    // Load the block exclusion set once and share across the user + recipe
-    // searches. Kitchen search is not filtered by blocks because a kitchen is
-    // a group resource, not a single user — the block list gates profile and
-    // authored-content visibility.
     const blockExclusionIds = await getBlockExclusionIds(viewerId);
 
     let recipes: RecipeSearchResult[] = [];
@@ -630,14 +839,32 @@ router.get(
     let usersTotal = 0;
     let kitchensTotal = 0;
 
-    if (type === "all") {
-      // Fetch all types in parallel
-      const [recipeResults, userResults, kitchenResults] =
-        await Promise.all([
-          searchRecipes(q, viewerId, page, limit, blockExclusionIds),
-          searchUsers(q, viewerId, page, limit, blockExclusionIds),
-          searchKitchens(q, viewerId, page, limit),
-        ]);
+    if (browseMode) {
+      const recipeResults = await searchRecipes({
+        query: undefined,
+        viewerId,
+        page,
+        limit,
+        blockExclusionIds,
+        filters,
+        sort,
+      });
+      recipes = recipeResults.recipes;
+      recipesTotal = recipeResults.total;
+    } else if (type === "all") {
+      const [recipeResults, userResults, kitchenResults] = await Promise.all([
+        searchRecipes({
+          query: q,
+          viewerId,
+          page,
+          limit,
+          blockExclusionIds,
+          filters,
+          sort,
+        }),
+        searchUsers(q as string, viewerId, page, limit, blockExclusionIds),
+        searchKitchens(q as string, viewerId, page, limit),
+      ]);
       recipes = recipeResults.recipes;
       recipesTotal = recipeResults.total;
       users = userResults.users;
@@ -645,18 +872,20 @@ router.get(
       kitchens = kitchenResults.kitchens;
       kitchensTotal = kitchenResults.total;
     } else if (type === "recipes") {
-      const recipeResults = await searchRecipes(
-        q,
+      const recipeResults = await searchRecipes({
+        query: q,
         viewerId,
         page,
         limit,
-        blockExclusionIds
-      );
+        blockExclusionIds,
+        filters,
+        sort,
+      });
       recipes = recipeResults.recipes;
       recipesTotal = recipeResults.total;
     } else if (type === "users") {
       const userResults = await searchUsers(
-        q,
+        q as string,
         viewerId,
         page,
         limit,
@@ -666,7 +895,7 @@ router.get(
       usersTotal = userResults.total;
     } else {
       const kitchenResults = await searchKitchens(
-        q,
+        q as string,
         viewerId,
         page,
         limit

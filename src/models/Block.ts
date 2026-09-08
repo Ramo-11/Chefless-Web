@@ -27,8 +27,6 @@ const blockSchema = new Schema<IBlock>(
 
 // Prevent duplicate block rows
 blockSchema.index({ blockerId: 1, blockedId: 1 }, { unique: true });
-// Separate indexes for filter lookups in either direction
-blockSchema.index({ blockerId: 1 });
 blockSchema.index({ blockedId: 1 });
 
 const Block =

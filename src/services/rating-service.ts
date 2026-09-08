@@ -64,24 +64,23 @@ async function isRatingPublic(
  * We recompute from scratch rather than $inc because ratings can change
  * kitchens / visibility over time and a running delta would drift.
  */
-async function recomputePublicAggregate(recipeId: Types.ObjectId): Promise<void> {
-  // Find the kitchens that currently consent to public aggregation.
-  const publicKitchens = await Kitchen.find({
-    ratingsVisibility: "public",
-  })
-    .select("_id")
-    .lean();
-  const publicKitchenIds = publicKitchens.map((k) => k._id);
-
+export async function recomputePublicAggregate(recipeId: Types.ObjectId): Promise<void> {
   const result = await RecipeRating.aggregate([
+    { $match: { recipeId } },
+    {
+      $lookup: {
+        from: "kitchens",
+        localField: "kitchenId",
+        foreignField: "_id",
+        as: "_kitchen",
+        pipeline: [{ $project: { ratingsVisibility: 1 } }],
+      },
+    },
     {
       $match: {
-        recipeId,
         $or: [
           { kitchenId: null },
-          ...(publicKitchenIds.length > 0
-            ? [{ kitchenId: { $in: publicKitchenIds } }]
-            : []),
+          { "_kitchen.ratingsVisibility": "public" },
         ],
       },
     },

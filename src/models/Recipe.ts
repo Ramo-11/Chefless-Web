@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
+import { normalizeIngredientName } from "../lib/ingredients";
 
 export interface IIngredient {
   name: string;
@@ -57,6 +58,7 @@ export interface IRecipe extends Document {
   tags: string[];
   difficulty?: "easy" | "medium" | "hard";
   ingredients: IIngredient[];
+  normalizedIngredients: string[];
   steps: IStep[];
   prepTime?: number;
   cookTime?: number;
@@ -83,12 +85,16 @@ export interface IRecipe extends Document {
   seasonalTags: string[];
   likesCount: number;
   forksCount: number;
+  /** Denormalized count of non-deleted comments and replies on this recipe. */
+  commentsCount: number;
   /** Denormalized mean of ratings visible globally (only public-visibility kitchens + solo cooks contribute). */
   avgRating: number;
   /** Count of ratings feeding `avgRating`. Zero when no public ratings exist. */
   ratingCount: number;
   isFeatured: boolean;
   featuredAt?: Date;
+  trendingScore: number;
+  trendingScoreUpdatedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   /** True when this recipe was inserted by the seed-data pipeline. */
@@ -99,6 +105,17 @@ export interface IRecipe extends Document {
   seedCuisine?: string;
   /** External id from TheMealDB (e.g. "52772") for de-duping on re-runs. */
   seedExternalId?: string;
+}
+
+export function computeNormalizedIngredients(
+  ingredients: Array<{ name: string }>
+): string[] {
+  const set = new Set<string>();
+  for (const ingredient of ingredients ?? []) {
+    const normalized = normalizeIngredientName(ingredient.name ?? "");
+    if (normalized) set.add(normalized);
+  }
+  return Array.from(set);
 }
 
 const ingredientSchema = new Schema<IIngredient>(
@@ -171,7 +188,6 @@ const recipeSchema = new Schema<IRecipe>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     title: {
       type: String,
@@ -229,6 +245,11 @@ const recipeSchema = new Schema<IRecipe>(
       type: [ingredientSchema],
       default: [],
     },
+    normalizedIngredients: {
+      type: [String],
+      default: [],
+      index: true,
+    },
     steps: {
       type: [stepSchema],
       default: [],
@@ -276,6 +297,7 @@ const recipeSchema = new Schema<IRecipe>(
     seasonalTags: {
       type: [String],
       default: [],
+      index: true,
     },
     likesCount: {
       type: Number,
@@ -284,6 +306,11 @@ const recipeSchema = new Schema<IRecipe>(
     forksCount: {
       type: Number,
       default: 0,
+    },
+    commentsCount: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     avgRating: {
       type: Number,
@@ -299,9 +326,15 @@ const recipeSchema = new Schema<IRecipe>(
     isFeatured: {
       type: Boolean,
       default: false,
-      index: true,
     },
     featuredAt: {
+      type: Date,
+    },
+    trendingScore: {
+      type: Number,
+      default: 0,
+    },
+    trendingScoreUpdatedAt: {
       type: Date,
     },
     isSeed: { type: Boolean, default: false, index: true },
@@ -329,6 +362,9 @@ recipeSchema.index({ createdAt: -1 });
 // Text index for search
 recipeSchema.index({ title: "text", "ingredients.name": "text" });
 
+// Exact ingredient-name lookups for pantry matching ("what can I cook").
+recipeSchema.index({ "ingredients.name": 1 });
+
 // Partial index for fast lookup of the currently featured recipe
 recipeSchema.index(
   { isFeatured: 1 },
@@ -337,6 +373,55 @@ recipeSchema.index(
 
 // Compound index for admin Seed Data grouping queries.
 recipeSchema.index({ isSeed: 1, seedCuisine: 1 });
+
+recipeSchema.index({ isHidden: 1, cuisineTags: 1, likesCount: -1 });
+recipeSchema.index({ isHidden: 1, dietaryTags: 1, likesCount: -1 });
+recipeSchema.index({ isHidden: 1, difficulty: 1, likesCount: -1 });
+recipeSchema.index({ isHidden: 1, avgRating: -1, ratingCount: 1 });
+recipeSchema.index({ isHidden: 1, seasonalTags: 1, likesCount: -1 });
+
+recipeSchema.index({ trendingScore: -1 });
+
+recipeSchema.pre("save", function (next) {
+  if (this.isNew || this.isModified("ingredients")) {
+    this.normalizedIngredients = computeNormalizedIngredients(this.ingredients);
+  }
+  next();
+});
+
+recipeSchema.pre(
+  ["updateOne", "findOneAndUpdate", "updateMany"],
+  function (next) {
+    const update = this.getUpdate() as Record<string, unknown> | null;
+    if (!update) return next();
+
+    const setBlock = update.$set as Record<string, unknown> | undefined;
+    if (setBlock && Array.isArray(setBlock.ingredients)) {
+      setBlock.normalizedIngredients = computeNormalizedIngredients(
+        setBlock.ingredients as Array<{ name: string }>
+      );
+    } else if (Array.isArray(update.ingredients)) {
+      update.normalizedIngredients = computeNormalizedIngredients(
+        update.ingredients as Array<{ name: string }>
+      );
+    }
+
+    next();
+  }
+);
+
+recipeSchema.pre("insertMany", function (next, docs) {
+  if (Array.isArray(docs)) {
+    for (const doc of docs as Array<Record<string, unknown>>) {
+      if (doc && Array.isArray(doc.ingredients)) {
+        doc.normalizedIngredients = computeNormalizedIngredients(
+          doc.ingredients as Array<{ name: string }>
+        );
+      }
+    }
+  }
+  next();
+});
 
 const Recipe =
   (mongoose.models.Recipe as mongoose.Model<IRecipe>) ||

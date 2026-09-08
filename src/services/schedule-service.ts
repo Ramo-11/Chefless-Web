@@ -725,18 +725,24 @@ export async function setEntryRsvp(
   }
 
   const uid = new Types.ObjectId(userId);
-  // Replace this member's RSVP: drop the existing one, then add the new choice
-  // (skip the add when clearing). Two scoped updates keep each member single.
-  await ScheduleEntry.updateOne(
-    { _id: entry._id },
-    { $pull: { rsvps: { userId: uid } } }
-  );
-  if (status) {
-    await ScheduleEntry.updateOne(
-      { _id: entry._id },
-      { $push: { rsvps: { userId: uid, status } } }
-    );
-  }
+  await ScheduleEntry.updateOne({ _id: entry._id }, [
+    {
+      $set: {
+        rsvps: {
+          $concatArrays: [
+            {
+              $filter: {
+                input: "$rsvps",
+                as: "r",
+                cond: { $ne: ["$$r.userId", uid] },
+              },
+            },
+            status ? [{ userId: uid, status }] : [],
+          ],
+        },
+      },
+    },
+  ]);
 
   const updated = await ScheduleEntry.findById(entryId).lean<IScheduleEntry>();
   if (!updated) {

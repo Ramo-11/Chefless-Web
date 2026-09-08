@@ -1,8 +1,7 @@
 import { Types } from "mongoose";
 import Recipe, { IRecipe } from "../models/Recipe";
 import User from "../models/User";
-import { canViewRecipe } from "./visibility-service";
-import { IUser } from "../models/User";
+import { buildAccessiblePrivateIds, resolveRecipeVisibility } from "./visibility-service";
 
 interface AppError extends Error {
   statusCode: number;
@@ -138,6 +137,14 @@ function toNode(
  *   rules — a node the viewer can't open is still shown grayed out so the
  *   tree shape remains intact.
  */
+interface RecipeAuthorFields {
+  _id: Types.ObjectId;
+  fullName: string;
+  profilePicture?: string | null;
+  isPublic: boolean;
+  isBanned?: boolean;
+}
+
 export async function getRemixTree(
   focusRecipeId: string,
   viewerId: string
@@ -146,142 +153,156 @@ export async function getRemixTree(
   if (!focus) throw createError("Recipe not found", 404);
 
   const viewerOid = new Types.ObjectId(viewerId);
+  const accessiblePrivateIds = await buildAccessiblePrivateIds(viewerOid);
 
-  // ── Ancestors ──────────────────────────────────────────────────────
-  const ancestorNodes: RemixTreeNode[] = [];
+  interface AncestorEntry {
+    depth: number;
+    recipe?: IRecipe;
+    deletedAuthorName?: string;
+  }
+  const ancestorEntries: AncestorEntry[] = [];
   let currentFork = focus.forkedFrom;
   let depth = -1;
   let truncated = false;
   const visited = new Set<string>([focus._id.toString()]);
 
   while (currentFork && depth >= -MAX_ANCESTOR_DEPTH) {
-    // If the parent recipe is deleted, surface a ghost node preserving the
-    // attribution name — then stop walking (chain is broken).
     if (!currentFork.recipeId) {
-      ancestorNodes.push(viewForDeleted(currentFork.authorName, depth));
+      ancestorEntries.push({ depth, deletedAuthorName: currentFork.authorName });
       break;
     }
     const parentId = currentFork.recipeId.toString();
-    if (visited.has(parentId)) break; // defensive guard against cycles
+    if (visited.has(parentId)) break;
     visited.add(parentId);
 
     const parent = await Recipe.findById(currentFork.recipeId);
     if (!parent) {
-      ancestorNodes.push(viewForDeleted(currentFork.authorName, depth));
+      ancestorEntries.push({ depth, deletedAuthorName: currentFork.authorName });
       break;
     }
 
-    const parentAuthor = await User.findById(parent.authorId)
-      .select("fullName profilePicture isPublic kitchenId isBanned")
-      .lean();
-    const viewable = parentAuthor
-      ? !parent.isHidden &&
-        !parentAuthor.isBanned &&
-        (await canViewRecipe(
-          viewerOid,
-          parent,
-          parentAuthor as unknown as IUser
-        ))
-      : false;
-
-    ancestorNodes.push(
-      toNode(parent, parentAuthor ?? null, depth, [], viewable)
-    );
-
+    ancestorEntries.push({ depth, recipe: parent });
     currentFork = parent.forkedFrom ?? undefined;
     depth -= 1;
   }
   if (currentFork && depth < -MAX_ANCESTOR_DEPTH) truncated = true;
-  ancestorNodes.reverse(); // root first
 
-  // ── Focus ──────────────────────────────────────────────────────────
-  const focusAuthor = await User.findById(focus.authorId)
-    .select("fullName profilePicture isPublic kitchenId isBanned")
-    .lean();
+  const ancestorAuthorIds = ancestorEntries
+    .map((entry) => entry.recipe?.authorId)
+    .filter((id): id is Types.ObjectId => !!id);
+  const earlyAuthorIds = [
+    ...new Set(
+      [...ancestorAuthorIds, focus.authorId].map((id) => id.toString())
+    ),
+  ].map((id) => new Types.ObjectId(id));
+  const earlyAuthors = await User.find({ _id: { $in: earlyAuthorIds } })
+    .select("fullName profilePicture isPublic isBanned")
+    .lean<RecipeAuthorFields[]>();
+  const earlyAuthorMap = new Map(
+    earlyAuthors.map((a) => [a._id.toString(), a])
+  );
+
+  const ancestorNodes: RemixTreeNode[] = ancestorEntries.map((entry) => {
+    if (entry.deletedAuthorName !== undefined) {
+      return viewForDeleted(entry.deletedAuthorName, entry.depth);
+    }
+    const recipe = entry.recipe!;
+    const author = earlyAuthorMap.get(recipe.authorId.toString());
+    const viewable = author
+      ? !recipe.isHidden &&
+        !author.isBanned &&
+        resolveRecipeVisibility(viewerOid, recipe, author, accessiblePrivateIds)
+      : false;
+    return toNode(recipe, author ?? null, entry.depth, [], viewable);
+  });
+  ancestorNodes.reverse();
+
+  const focusAuthor = earlyAuthorMap.get(focus.authorId.toString()) ?? null;
   const focusViewable = focusAuthor
     ? !focus.isHidden &&
       !focusAuthor.isBanned &&
-      (await canViewRecipe(
-        viewerOid,
-        focus,
-        focusAuthor as unknown as IUser
-      ))
+      resolveRecipeVisibility(viewerOid, focus, focusAuthor, accessiblePrivateIds)
     : false;
 
-  // ── Descendants (BFS) ──────────────────────────────────────────────
-  interface QueueEntry {
-    recipeId: Types.ObjectId;
-    depth: number;
-  }
-  const queue: QueueEntry[] = [{ recipeId: focus._id, depth: 0 }];
   const descendants: RemixTreeNode[] = [];
   const descendantNodeMap = new Map<string, RemixTreeNode>();
-  let nodeCount = 0;
-
-  // childIds for the focus node collected as we discover forks.
   const focusChildIds: string[] = [];
+  let nodeCount = 0;
+  let capped = false;
 
-  while (queue.length > 0 && nodeCount < MAX_DESCENDANT_NODES) {
-    const { recipeId: parentRecipeId, depth: parentDepth } = queue.shift()!;
-    if (parentDepth + 1 > MAX_DESCENDANT_DEPTH) {
+  let currentLevelIds: Types.ObjectId[] = [focus._id];
+  let currentDepth = 0;
+
+  while (currentLevelIds.length > 0 && !capped) {
+    const nextDepth = currentDepth + 1;
+    if (nextDepth > MAX_DESCENDANT_DEPTH) {
       truncated = true;
-      continue;
+      break;
     }
 
     const children = await Recipe.find({
-      "forkedFrom.recipeId": parentRecipeId,
+      "forkedFrom.recipeId": { $in: currentLevelIds },
     })
       .select(
         "title photos authorId createdAt likesCount forksCount isHidden isPrivate forkedFrom"
       )
       .lean<IRecipe[]>();
 
-    if (children.length === 0) continue;
+    if (children.length === 0) break;
+
+    const byParent = new Map<string, IRecipe[]>();
+    for (const child of children) {
+      const parentIdStr = child.forkedFrom?.recipeId?.toString();
+      if (!parentIdStr) continue;
+      const bucket = byParent.get(parentIdStr);
+      if (bucket) bucket.push(child);
+      else byParent.set(parentIdStr, [child]);
+    }
+
+    const orderedChildren: IRecipe[] = [];
+    for (const parentId of currentLevelIds) {
+      const bucket = byParent.get(parentId.toString());
+      if (bucket) orderedChildren.push(...bucket);
+    }
 
     const authorIds = [
-      ...new Set(children.map((c) => c.authorId.toString())),
+      ...new Set(orderedChildren.map((c) => c.authorId.toString())),
     ].map((id) => new Types.ObjectId(id));
     const authors = await User.find({ _id: { $in: authorIds } })
-      .select("fullName profilePicture isPublic kitchenId isBanned")
-      .lean();
+      .select("fullName profilePicture isPublic isBanned")
+      .lean<RecipeAuthorFields[]>();
     const authorMap = new Map(authors.map((a) => [a._id.toString(), a]));
 
-    for (const child of children) {
+    const nextLevelIds: Types.ObjectId[] = [];
+
+    for (const child of orderedChildren) {
       if (nodeCount >= MAX_DESCENDANT_NODES) {
         truncated = true;
+        capped = true;
         break;
       }
-      if (visited.has(child._id.toString())) continue; // already visited (cycle guard)
-      visited.add(child._id.toString());
+      const childIdStr = child._id.toString();
+      if (visited.has(childIdStr)) continue;
+      visited.add(childIdStr);
 
       const childAuthor = authorMap.get(child.authorId.toString());
       const viewable = childAuthor
         ? !child.isHidden &&
           !childAuthor.isBanned &&
-          (await canViewRecipe(
+          resolveRecipeVisibility(
             viewerOid,
             child,
-            childAuthor as unknown as IUser
-          ))
+            childAuthor,
+            accessiblePrivateIds
+          )
         : false;
 
-      const node = toNode(
-        child,
-        childAuthor ?? null,
-        parentDepth + 1,
-        [],
-        viewable
-      );
+      const node = toNode(child, childAuthor ?? null, nextDepth, [], viewable);
       descendants.push(node);
-      // Key the internal graph on the REAL recipe id, not the node's exposed
-      // `recipeId` (which is nulled for redacted nodes) so the tree shape and
-      // parent/child links survive redaction.
-      const childIdStr = child._id.toString();
       descendantNodeMap.set(childIdStr, node);
       nodeCount += 1;
 
-      // Append this child to its parent's childIds list.
-      const parentIdStr = parentRecipeId.toString();
+      const parentIdStr = child.forkedFrom!.recipeId!.toString();
       if (parentIdStr === focus._id.toString()) {
         focusChildIds.push(childIdStr);
       } else {
@@ -289,13 +310,16 @@ export async function getRemixTree(
         if (parentNode) parentNode.childIds.push(childIdStr);
       }
 
-      queue.push({ recipeId: child._id, depth: parentDepth + 1 });
+      nextLevelIds.push(child._id);
     }
+
+    currentLevelIds = nextLevelIds;
+    currentDepth = nextDepth;
   }
 
   const focusNode = toNode(
     focus,
-    focusAuthor ?? null,
+    focusAuthor,
     0,
     focusChildIds,
     focusViewable

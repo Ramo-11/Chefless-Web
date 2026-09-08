@@ -17,6 +17,9 @@ export interface NotificationPreferences {
   recipe_forked: boolean;
   recipe_saved: boolean;
   recipe_shared: boolean;
+  recipe_commented: boolean;
+  comment_reply: boolean;
+  cooked_post_commented: boolean;
   schedule_suggestion: boolean;
   suggestion_approved: boolean;
   suggestion_denied: boolean;
@@ -42,6 +45,9 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   recipe_forked: true,
   recipe_saved: true,
   recipe_shared: true,
+  recipe_commented: true,
+  comment_reply: true,
+  cooked_post_commented: true,
   schedule_suggestion: true,
   suggestion_approved: true,
   suggestion_denied: true,
@@ -90,6 +96,7 @@ export interface IUser extends Document {
   shippingAddress?: ShippingAddress;
   dietaryPreferences?: string[];
   cuisinePreferences?: string[];
+  unlockedCuisines?: string[];
   /**
    * App display language (ISO 639-1). The cross-device sync source — the
    * device-side SharedPreferences cache is what actually renders the UI. New
@@ -246,6 +253,7 @@ const userSchema = new Schema<IUser>(
     shippingAddress: { type: shippingAddressSchema },
     dietaryPreferences: [{ type: String }],
     cuisinePreferences: [{ type: String }],
+    unlockedCuisines: { type: [String], default: undefined },
     language: {
       type: String,
       enum: ["en", "ar", "tr", "es"],
@@ -270,6 +278,9 @@ const userSchema = new Schema<IUser>(
         recipe_forked: { type: Boolean, default: true },
         recipe_saved: { type: Boolean, default: true },
         recipe_shared: { type: Boolean, default: true },
+        recipe_commented: { type: Boolean, default: true },
+        comment_reply: { type: Boolean, default: true },
+        cooked_post_commented: { type: Boolean, default: true },
         schedule_suggestion: { type: Boolean, default: true },
         suggestion_approved: { type: Boolean, default: true },
         suggestion_denied: { type: Boolean, default: true },
@@ -313,7 +324,7 @@ const userSchema = new Schema<IUser>(
     aiSubstitutionsCount: { type: Number, default: 0 },
     aiFormatCount: { type: Number, default: 0 },
     aiLastUsedAt: { type: Date },
-    isSeed: { type: Boolean, default: false, index: true },
+    isSeed: { type: Boolean, default: false },
     seedSource: { type: String, enum: ["themealdb", "curated"] },
     seedCuisine: { type: String, index: true },
   },

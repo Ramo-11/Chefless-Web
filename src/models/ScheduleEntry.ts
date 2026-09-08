@@ -164,6 +164,8 @@ scheduleEntrySchema.index({ userId: 1, date: 1 });
 // For querying suggestions by user
 scheduleEntrySchema.index({ suggestedBy: 1 });
 
+scheduleEntrySchema.index({ recipeId: 1 });
+
 const ScheduleEntry =
   (mongoose.models.ScheduleEntry as mongoose.Model<IScheduleEntry>) ||
   mongoose.model<IScheduleEntry>("ScheduleEntry", scheduleEntrySchema);

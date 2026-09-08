@@ -20,7 +20,6 @@ const recipeShareSchema = new Schema<IRecipeShare>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     recipeId: {
       type: Schema.Types.ObjectId,
@@ -43,6 +42,8 @@ recipeShareSchema.index(
   { senderId: 1, recipientId: 1, recipeId: 1 },
   { unique: true }
 );
+
+recipeShareSchema.index({ recipientId: 1, _id: -1 });
 
 // TTL: auto-delete shares older than 365 days
 recipeShareSchema.index(

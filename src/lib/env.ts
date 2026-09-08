@@ -112,6 +112,7 @@ const envSchema = z.object({
     .url()
     .optional()
     .default("https://chefless-web.onrender.com"),
+  ATLAS_SEARCH_MODE: z.enum(["auto", "on", "off"]).default("auto"),
 });
 
 export type Env = z.infer<typeof envSchema>;

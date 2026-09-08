@@ -3,6 +3,7 @@ import crypto from "crypto";
 import express from "express";
 import cors, { CorsOptions } from "cors";
 import helmet from "helmet";
+import compression from "compression";
 import session from "express-session";
 import MongoStore from "connect-mongo";
 import { env } from "./lib/env";
@@ -43,6 +44,8 @@ import remixTreeRouter from "./routes/remix-tree";
 import wrappedRouter from "./routes/wrapped";
 import appConfigRouter from "./routes/app-config";
 import publicRouter from "./routes/public";
+import commentsRouter from "./routes/comments";
+import pantryRouter from "./routes/pantry";
 
 const app = express();
 
@@ -67,6 +70,8 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use(helmet({
   contentSecurityPolicy: false,
 }));
+
+app.use(compression());
 
 // ── Content-Security-Policy for the admin panel ─────────────────────
 // Scoped to /admin only (the JSON API renders no HTML and must not receive
@@ -220,6 +225,8 @@ app.use("/api/kitchens", jsonUpload, ...apiLimiters, kitchensRouter);
 app.use("/api/schedule", jsonDefault, ...apiLimiters, scheduleRouter);
 app.use("/api/shopping-lists", jsonDefault, ...apiLimiters, shoppingListsRouter);
 app.use("/api/search", jsonDefault, ...apiLimiters, searchRouter);
+app.use("/api/comments", jsonDefault, ...apiLimiters, commentsRouter);
+app.use("/api/pantry", jsonDefault, ...apiLimiters, pantryRouter);
 app.use("/api/feed", jsonDefault, ...apiLimiters, feedRouter);
 app.use("/api/notifications", jsonDefault, ...apiLimiters, notificationsRouter);
 app.use("/api/labels", jsonDefault, ...apiLimiters, labelsRouter);

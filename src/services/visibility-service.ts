@@ -1,7 +1,53 @@
 import { Types } from "mongoose";
 import Follow from "../models/Follow";
-import { IUser } from "../models/User";
+import User, { IUser } from "../models/User";
 import { isBlocked } from "./block-service";
+
+export async function buildAccessiblePrivateIds(
+  userId: Types.ObjectId
+): Promise<Types.ObjectId[]> {
+  const [follows, viewer] = await Promise.all([
+    Follow.find({ followerId: userId, status: "active" })
+      .select("followingId")
+      .lean(),
+    User.findById(userId).select("kitchenId").lean(),
+  ]);
+  const followingIds = follows.map((f) => f.followingId);
+
+  let kitchenMemberIds: Types.ObjectId[] = [];
+  if (viewer?.kitchenId) {
+    const members = await User.find({
+      kitchenId: viewer.kitchenId,
+      _id: { $ne: userId },
+    })
+      .select("_id")
+      .lean();
+    kitchenMemberIds = members.map((m) => m._id);
+  }
+
+  return [...followingIds, ...kitchenMemberIds];
+}
+
+export function resolveRecipeVisibility(
+  viewerId: Types.ObjectId | string | null,
+  recipe: { authorId: Types.ObjectId; isPrivate: boolean },
+  author: { _id: Types.ObjectId; isPublic: boolean },
+  accessiblePrivateIds: Types.ObjectId[]
+): boolean {
+  if (viewerId && recipe.authorId.equals(viewerId)) {
+    return true;
+  }
+  if (recipe.isPrivate) {
+    return false;
+  }
+  if (author.isPublic) {
+    return true;
+  }
+  if (!viewerId) {
+    return false;
+  }
+  return accessiblePrivateIds.some((id) => id.equals(author._id));
+}
 
 export async function canViewProfile(
   viewerId: Types.ObjectId | string | null,
@@ -88,7 +134,6 @@ export async function canViewRecipe(
 
   // Check if they share a kitchen
   if (author.kitchenId) {
-    const User = (await import("../models/User")).default;
     const viewer = await User.findById(viewerId).select("kitchenId").lean();
     if (
       viewer &&

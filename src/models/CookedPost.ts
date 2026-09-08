@@ -29,6 +29,8 @@ export interface ICookedPost extends Document {
    * and regional-completion progress. Empty array if the recipe had no cuisines.
    */
   cuisineTags: string[];
+  /** Denormalized count of non-deleted comments and replies on this post. */
+  commentsCount: number;
   /** Set when the recipe owner removed this post. Null otherwise. */
   removedAt?: Date | null;
   /** Recipe owner who performed the removal. */
@@ -45,13 +47,11 @@ const cookedPostSchema = new Schema<ICookedPost>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     recipeId: {
       type: Schema.Types.ObjectId,
       ref: "Recipe",
       default: null,
-      index: true,
     },
     recipeTitle: {
       type: String,
@@ -79,10 +79,14 @@ const cookedPostSchema = new Schema<ICookedPost>(
       default: [],
       index: true,
     },
+    commentsCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     removedAt: {
       type: Date,
       default: null,
-      index: true,
     },
     removedBy: {
       type: Schema.Types.ObjectId,

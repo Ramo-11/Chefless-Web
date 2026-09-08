@@ -14,10 +14,12 @@ import KitchenInvite from "../models/KitchenInvite";
 import Report from "../models/Report";
 import Block from "../models/Block";
 import CookedPost from "../models/CookedPost";
+import RecipeRating from "../models/RecipeRating";
 import admin from "firebase-admin";
 import { canViewProfile } from "./visibility-service";
 import { isBlocked } from "./block-service";
 import { cascadeRecipeDeletion } from "./recipe-service";
+import { recomputePublicAggregate } from "./rating-service";
 import {
   notifyNewFollower,
   notifyFollowRequest,
@@ -507,6 +509,17 @@ export async function deleteAccount(userId: string): Promise<void> {
     { $set: { "forkedFrom.authorId": null } }
   );
 
+  const myRatings = await RecipeRating.find({ userId: objectId })
+    .select("recipeId")
+    .lean();
+  if (myRatings.length > 0) {
+    await RecipeRating.deleteMany({ userId: objectId });
+    const affectedRecipeIds = Array.from(
+      new Set(myRatings.map((r) => r.recipeId.toString()))
+    ).map((id) => new Types.ObjectId(id));
+    await Promise.all(affectedRecipeIds.map(recomputePublicAggregate));
+  }
+
   // Delete cookbooks owned by this user (cookbooks contain recipe references only, no denorm counters)
   await Cookbook.deleteMany({ ownerId: objectId });
 
@@ -721,11 +734,34 @@ export async function followUser(
 
   const status = target.isPublic ? "active" : "pending";
 
-  const follow = await Follow.create({
-    followerId: new Types.ObjectId(followerId),
-    followingId: new Types.ObjectId(targetId),
-    status,
-  });
+  let follow: IFollow;
+  try {
+    follow = await Follow.create({
+      followerId: new Types.ObjectId(followerId),
+      followingId: new Types.ObjectId(targetId),
+      status,
+    });
+  } catch (err: unknown) {
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code?: number }).code === 11000
+    ) {
+      const race = await Follow.findOne({
+        followerId: new Types.ObjectId(followerId),
+        followingId: new Types.ObjectId(targetId),
+      }).lean();
+      const error = new Error(
+        race?.status === "pending"
+          ? "Follow request already pending"
+          : "Already following this user"
+      ) as Error & { statusCode: number };
+      error.statusCode = 409;
+      throw error;
+    }
+    throw err;
+  }
 
   // If active follow, increment counters atomically
   if (status === "active") {

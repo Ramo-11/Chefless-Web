@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import CookedPost, { ICookedPost } from "../models/CookedPost";
 import Recipe from "../models/Recipe";
+import Comment from "../models/Comment";
 import User, { IUser } from "../models/User";
 import { uploadImage } from "../lib/cloudinary";
 import {
@@ -43,6 +44,7 @@ export interface CookedPostView {
   photoUrl: string;
   caption?: string;
   cuisineTags: string[];
+  commentsCount: number;
   createdAt: Date;
   author: CookedPostAuthor | null;
 }
@@ -77,6 +79,7 @@ function toView(
     photoUrl: post.photoUrl,
     caption: post.caption,
     cuisineTags: post.cuisineTags,
+    commentsCount: post.commentsCount ?? 0,
     createdAt: post.createdAt,
     author,
   };
@@ -112,7 +115,9 @@ export async function createCookedPost(params: {
 
   const [recipe, user] = await Promise.all([
     Recipe.findById(recipeId),
-    User.findById(userId).select("fullName profilePicture").lean(),
+    User.findById(userId)
+      .select("fullName profilePicture unlockedCuisines")
+      .lean(),
   ]);
   if (!recipe) throw createError("Recipe not found", 404);
   if (!user) throw createError("User not found", 404);
@@ -153,15 +158,20 @@ export async function createCookedPost(params: {
 
   // Determine which cuisines / region are NEW for this user — done *before*
   // inserting the post so we can accurately detect first unlocks.
-  const priorCuisines = await CookedPost.distinct("cuisineTags", {
-    userId: userOid,
-    removedAt: null,
-  });
-  const priorSet = new Set<string>(
-    priorCuisines
-      .map((c) => (typeof c === "string" ? canonicalCuisine(c) ?? c : null))
-      .filter((c): c is string => c !== null)
-  );
+  let priorSet: Set<string>;
+  if (user.unlockedCuisines !== undefined) {
+    priorSet = new Set(user.unlockedCuisines);
+  } else {
+    const priorCuisines = await CookedPost.distinct("cuisineTags", {
+      userId: userOid,
+      removedAt: null,
+    });
+    priorSet = new Set<string>(
+      priorCuisines
+        .map((c) => (typeof c === "string" ? canonicalCuisine(c) ?? c : null))
+        .filter((c): c is string => c !== null)
+    );
+  }
 
   const priorEarnedBadges = earnedBadgeIds(priorSet);
 
@@ -184,6 +194,13 @@ export async function createCookedPost(params: {
       newStamps.push(canonical);
       priorSet.add(canonical);
     }
+  }
+
+  if (priorSet.size > 0) {
+    await User.updateOne(
+      { _id: userOid },
+      { $addToSet: { unlockedCuisines: { $each: Array.from(priorSet) } } }
+    );
   }
 
   const newRegions: string[] = [];
@@ -382,7 +399,10 @@ export async function deleteCookedPost(
   if (!post.userId.equals(userId)) {
     throw createError("You can only delete your own posts", 403);
   }
-  await CookedPost.findByIdAndDelete(postId);
+  await Promise.all([
+    CookedPost.findByIdAndDelete(postId),
+    Comment.deleteMany({ targetType: "cooked_post", targetId: post._id }),
+  ]);
 }
 
 /** Total count of cooked posts across a recipe — for quick display. */

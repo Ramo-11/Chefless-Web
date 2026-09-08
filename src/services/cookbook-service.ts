@@ -2,7 +2,11 @@ import { Types, FilterQuery } from "mongoose";
 import Cookbook, { ICookbook } from "../models/Cookbook";
 import Recipe, { IRecipe } from "../models/Recipe";
 import User, { IUser } from "../models/User";
-import { canViewProfile, canViewRecipe } from "./visibility-service";
+import {
+  canViewProfile,
+  buildAccessiblePrivateIds,
+  resolveRecipeVisibility,
+} from "./visibility-service";
 import { isBlocked } from "./block-service";
 import { hydrateListForViewer } from "./recipe-service";
 import { hasActivePremium } from "../lib/premium";
@@ -305,8 +309,8 @@ export async function getCookbook(
 
   // Owners see everything; non-owners must never learn the IDs of private
   // recipes inside a cookbook. Filter `recipeIds` to the subset the viewer is
-  // actually allowed to see (visibility applied per-recipe via canViewRecipe).
-  // Mutate only the returned plain object, never the Mongoose document.
+  // actually allowed to see. Mutate only the returned plain object, never the
+  // Mongoose document.
   if (!isOwner && cookbook.recipeIds.length > 0) {
     const recipes = await Recipe.find({
       _id: { $in: cookbook.recipeIds },
@@ -316,12 +320,15 @@ export async function getCookbook(
         { _id: Types.ObjectId; authorId: Types.ObjectId; isPrivate: boolean }[]
       >();
 
-    const visibleIds: Types.ObjectId[] = [];
-    for (const r of recipes) {
-      const canSee = await canViewRecipe(viewerId, r, owner);
-      if (canSee) visibleIds.push(r._id);
-    }
-    obj.recipeIds = visibleIds;
+    const accessiblePrivateIds = viewerId
+      ? await buildAccessiblePrivateIds(new Types.ObjectId(viewerId))
+      : [];
+
+    obj.recipeIds = recipes
+      .filter((r) =>
+        resolveRecipeVisibility(viewerId, r, owner, accessiblePrivateIds)
+      )
+      .map((r) => r._id);
   }
 
   return obj;
@@ -472,13 +479,15 @@ export async function listCookbookRecipes(
   // Defence-in-depth: re-check each recipe's visibility for non-owners.
   // (For shared/public accounts this is redundant with the isPrivate filter,
   // but covers private accounts where the owner's profile became invisible.)
-  const visible: IRecipe[] = [];
-  for (const recipe of recipes) {
-    const canSee = isOwner
-      ? true
-      : await canViewRecipe(viewerId ?? null, recipe, owner);
-    if (canSee) visible.push(recipe);
-  }
+  const accessiblePrivateIds =
+    !isOwner && viewerId
+      ? await buildAccessiblePrivateIds(new Types.ObjectId(viewerId))
+      : [];
+  const visible: IRecipe[] = isOwner
+    ? recipes
+    : recipes.filter((recipe) =>
+        resolveRecipeVisibility(viewerId ?? null, recipe, owner, accessiblePrivateIds)
+      );
 
   const hydrated = await hydrateListForViewer(visible, viewerId);
 

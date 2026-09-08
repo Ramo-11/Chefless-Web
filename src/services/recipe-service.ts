@@ -10,6 +10,7 @@ import Cookbook from "../models/Cookbook";
 import ShoppingList from "../models/ShoppingList";
 import Notification from "../models/Notification";
 import Report from "../models/Report";
+import Comment from "../models/Comment";
 import User, { IUser } from "../models/User";
 import { canViewRecipe } from "./visibility-service";
 import { uploadImage, deleteImage, publicIdFromUrl } from "../lib/cloudinary";
@@ -34,6 +35,11 @@ import { getBlockedUserIds } from "./block-service";
 export const FREE_TIER_RECIPE_LIMIT = 5;
 /** Max remixes a free user can author. */
 const FREE_TIER_REMIX_LIMIT = 1;
+
+const RECIPE_CARD_FIELDS =
+  "authorId title photos difficulty cookTime totalTime servings labels " +
+  "dietaryTags cuisineTags isPrivate likesCount forksCount commentsCount " +
+  "avgRating ratingCount createdAt";
 
 interface AppError extends Error {
   statusCode: number;
@@ -158,6 +164,7 @@ export async function hydrateListForViewer(
     const author = authorMap.get(recipe.authorId.toString());
     return {
       ...recipe,
+      commentsCount: recipe.commentsCount ?? 0,
       authorName: author?.fullName,
       authorPhoto: author?.profilePicture ?? null,
       isLiked: overrides.allLiked ? true : likedSet.has(id),
@@ -399,6 +406,7 @@ export async function getRecipe(
   }
 
   const recipeObj = recipe.toObject() as unknown as Record<string, unknown>;
+  recipeObj.commentsCount = recipe.commentsCount ?? 0;
   recipeObj.authorName = author.fullName;
   recipeObj.authorPhoto = author.profilePicture ?? null;
   recipeObj.authorSignatureUrl =
@@ -557,6 +565,8 @@ export async function cascadeRecipeDeletion(recipe: IRecipe): Promise<void> {
 
     // Reports targeting this recipe — no target left to moderate.
     Report.deleteMany({ targetType: "recipe", targetId: recipeId }),
+
+    Comment.deleteMany({ targetType: "recipe", targetId: recipeId }),
   ]);
 
   // Repair cookbook.recipesCount for every cookbook the recipe was pulled from.
@@ -663,6 +673,7 @@ export async function listMyRecipes(
 
   const [data, total] = await Promise.all([
     Recipe.find(query)
+      .select(`${RECIPE_CARD_FIELDS} forkedFrom`)
       .sort(sortOption)
       .skip(skip)
       .limit(limit)
@@ -955,7 +966,9 @@ export async function listLikedRecipes(
   if (blockedIds.length > 0) {
     recipeQuery.authorId = { $nin: blockedIds };
   }
-  const recipes = await Recipe.find(recipeQuery).lean<IRecipe[]>();
+  const recipes = await Recipe.find(recipeQuery)
+    .select(RECIPE_CARD_FIELDS)
+    .lean<IRecipe[]>();
 
   // Maintain the order from likes (newest liked first)
   const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
@@ -1130,7 +1143,9 @@ export async function listSavedRecipes(
   if (blockedIds.length > 0) {
     recipeQuery.authorId = { $nin: blockedIds };
   }
-  const recipes = await Recipe.find(recipeQuery).lean<IRecipe[]>();
+  const recipes = await Recipe.find(recipeQuery)
+    .select(RECIPE_CARD_FIELDS)
+    .lean<IRecipe[]>();
 
   const recipeMap = new Map(recipes.map((r) => [r._id.toString(), r]));
   const orderedRecipes = recipeIds
@@ -1163,6 +1178,7 @@ export async function listForkedRecipes(
 
   const [data, total] = await Promise.all([
     Recipe.find(query)
+      .select(RECIPE_CARD_FIELDS)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)

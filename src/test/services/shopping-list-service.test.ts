@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Types } from "mongoose";
 import {
   addItem,
+  addItems,
   createList,
   duplicateList,
   generateFromSchedule,
@@ -271,5 +272,95 @@ describe("shopping-list-service item order", () => {
       expect(updated.items[1].order).toBe(0);
       expect(updated.items[0].order).toBe(1);
     });
+  });
+});
+
+describe("shopping-list-service bulk add", () => {
+  it("appends a whole recipe in one call, numbered after the existing items", async () => {
+    const user = await createTestUser();
+    const list = await createList(user._id.toString(), {
+      name: "Dinner",
+      isPrivate: true,
+      items: [{ name: "Rice" }],
+    });
+
+    const updated = await addItems(list._id.toString(), user._id.toString(), [
+      { name: "Onion", quantity: 2, unit: "piece" },
+      { name: "Garlic", quantity: 3, unit: "clove" },
+    ]);
+
+    expect(updated.items.map((item) => item.name)).toEqual([
+      "Rice",
+      "Onion",
+      "Garlic",
+    ]);
+    expect(updated.items.map((item) => item.order)).toEqual([0, 1, 2]);
+  });
+
+  it("adds the amount to an existing line when the name and unit match", async () => {
+    const user = await createTestUser();
+    const list = await createList(user._id.toString(), {
+      name: "Dinner",
+      isPrivate: true,
+    });
+
+    await addItems(list._id.toString(), user._id.toString(), [
+      { name: "Onion", quantity: 2, unit: "piece" },
+    ]);
+    const updated = await addItems(list._id.toString(), user._id.toString(), [
+      { name: "onion", quantity: 3, unit: "piece" },
+    ]);
+
+    expect(updated.items).toHaveLength(1);
+    expect(updated.items[0].quantity).toBe(5);
+  });
+
+  it("keeps a separate line when the same ingredient arrives in another unit", async () => {
+    const user = await createTestUser();
+    const list = await createList(user._id.toString(), {
+      name: "Dinner",
+      isPrivate: true,
+    });
+
+    await addItems(list._id.toString(), user._id.toString(), [
+      { name: "Flour", quantity: 2, unit: "cup" },
+    ]);
+    const updated = await addItems(list._id.toString(), user._id.toString(), [
+      { name: "Flour", quantity: 250, unit: "g" },
+    ]);
+
+    expect(updated.items).toHaveLength(2);
+  });
+
+  it("refuses to push a list past the item ceiling", async () => {
+    const user = await createTestUser();
+    const list = await createList(user._id.toString(), {
+      name: "Huge",
+      isPrivate: true,
+      items: Array.from({ length: 200 }, (_, i) => ({ name: `Item ${i}` })),
+    });
+
+    await expect(
+      addItems(
+        list._id.toString(),
+        user._id.toString(),
+        Array.from({ length: 301 }, (_, i) => ({ name: `Extra ${i}` }))
+      )
+    ).rejects.toThrow(/limited to 500 items/);
+  });
+
+  it("refuses a member who cannot see the list", async () => {
+    const owner = await createTestUser();
+    const stranger = await createTestUser();
+    const list = await createList(owner._id.toString(), {
+      name: "Private",
+      isPrivate: true,
+    });
+
+    await expect(
+      addItems(list._id.toString(), stranger._id.toString(), [
+        { name: "Milk" },
+      ])
+    ).rejects.toThrow();
   });
 });

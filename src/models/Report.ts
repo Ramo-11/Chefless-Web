@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
-export type ReportTargetType = "recipe" | "user";
+export type ReportTargetType = "recipe" | "user" | "comment";
 export type ReportReason =
   | "spam"
   | "inappropriate"
@@ -37,7 +37,7 @@ const reportSchema = new Schema<IReport>(
     },
     targetType: {
       type: String,
-      enum: ["recipe", "user"],
+      enum: ["recipe", "user", "comment"],
       required: true,
     },
     targetId: {

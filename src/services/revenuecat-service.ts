@@ -19,6 +19,8 @@ import { logger } from "../lib/logger";
 
 const REVENUECAT_API_BASE = "https://api.revenuecat.com/v1";
 
+const REVENUECAT_TIMEOUT_MS = 8000;
+
 /** Entitlement identifier configured in the RevenueCat dashboard. */
 const PREMIUM_ENTITLEMENT_ID = "Chefless Pro";
 
@@ -79,6 +81,7 @@ export async function fetchPremiumStatus(
         Authorization: `Bearer ${env.REVENUECAT_API_KEY}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(REVENUECAT_TIMEOUT_MS),
     }
   );
 

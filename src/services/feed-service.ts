@@ -6,6 +6,7 @@ import Like from "../models/Like";
 import SavedRecipe from "../models/SavedRecipe";
 import SeasonalTag from "../models/SeasonalTag";
 import { getBlockedUserIds } from "./block-service";
+import { buildAccessiblePrivateIds } from "./visibility-service";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ interface FeedRecipe {
   isPrivate: boolean;
   likesCount: number;
   forksCount: number;
+  commentsCount: number;
   createdAt: Date;
   updatedAt: Date;
   authorName: string;
@@ -48,6 +50,124 @@ interface PaginatedFeed {
   limit: number;
   total: number;
   totalPages: number;
+  hasMore: boolean;
+}
+
+export const FEED_POOL_SIZE = 2000;
+
+export const TRENDING_HALF_LIFE_DAYS = 14;
+export const TRENDING_DECAY_RATE = Math.LN2 / TRENDING_HALF_LIFE_DAYS;
+
+const TRENDING_SCORE_STALE_MS = 4 * 24 * 60 * 60 * 1000;
+
+function dedupeIds(
+  docs: Array<{ _id: Types.ObjectId }>,
+  limit: number
+): Types.ObjectId[] {
+  const seen = new Set<string>();
+  const ids: Types.ObjectId[] = [];
+  for (const doc of docs) {
+    if (ids.length >= limit) break;
+    const key = doc._id.toString();
+    if (!seen.has(key)) {
+      seen.add(key);
+      ids.push(doc._id);
+    }
+  }
+  return ids;
+}
+
+async function getRecencyPopularityPoolIds(
+  baseMatch: Record<string, unknown>
+): Promise<Types.ObjectId[]> {
+  const [recent, popular] = await Promise.all([
+    Recipe.find(baseMatch)
+      .select("_id")
+      .sort({ createdAt: -1 })
+      .limit(FEED_POOL_SIZE)
+      .lean(),
+    Recipe.find(baseMatch)
+      .select("_id")
+      .sort({ likesCount: -1 })
+      .limit(FEED_POOL_SIZE)
+      .lean(),
+  ]);
+  return dedupeIds([...recent, ...popular], FEED_POOL_SIZE);
+}
+
+async function getForYouCandidateIds(
+  baseMatch: Record<string, unknown>,
+  userDietary: string[],
+  userCuisine: string[]
+): Promise<Types.ObjectId[]> {
+  if (userDietary.length === 0 && userCuisine.length === 0) {
+    return getRecencyPopularityPoolIds(baseMatch);
+  }
+
+  const preferenceMatch: Record<string, unknown> = {
+    ...baseMatch,
+    $or: [
+      ...(userDietary.length > 0 ? [{ dietaryTags: { $in: userDietary } }] : []),
+      ...(userCuisine.length > 0 ? [{ cuisineTags: { $in: userCuisine } }] : []),
+    ],
+  };
+
+  const docs = await Recipe.find(preferenceMatch)
+    .select("_id")
+    .sort({ createdAt: -1 })
+    .limit(FEED_POOL_SIZE)
+    .lean();
+  return docs.map((d) => d._id);
+}
+
+async function getTrendingCandidateIds(
+  baseMatch: Record<string, unknown>
+): Promise<{ ids: Types.ObjectId[]; materialized: boolean }> {
+  const freshest = await Recipe.findOne({ trendingScore: { $gt: 0 } })
+    .select("trendingScoreUpdatedAt")
+    .sort({ trendingScore: -1 })
+    .lean();
+
+  const isStale =
+    !freshest?.trendingScoreUpdatedAt ||
+    Date.now() - freshest.trendingScoreUpdatedAt.getTime() > TRENDING_SCORE_STALE_MS;
+
+  if (!freshest || isStale) {
+    return { ids: await getRecencyPopularityPoolIds(baseMatch), materialized: false };
+  }
+
+  const docs = await Recipe.find(baseMatch)
+    .select("_id")
+    .sort({ trendingScore: -1 })
+    .limit(FEED_POOL_SIZE)
+    .lean();
+  return { ids: docs.map((d) => d._id), materialized: true };
+}
+
+async function getSeasonalCandidateIds(
+  baseMatch: Record<string, unknown>,
+  activeSlugs: string[]
+): Promise<Types.ObjectId[]> {
+  if (activeSlugs.length === 0) {
+    return getRecencyPopularityPoolIds(baseMatch);
+  }
+
+  const docs = await Recipe.find({
+    ...baseMatch,
+    seasonalTags: { $in: activeSlugs },
+  })
+    .select("_id")
+    .sort({ likesCount: -1, createdAt: -1 })
+    .limit(FEED_POOL_SIZE)
+    .lean();
+  return docs.map((d) => d._id);
+}
+
+function splitHasMore<T>(docs: T[], limit: number): { page: T[]; hasMore: boolean } {
+  if (docs.length > limit) {
+    return { page: docs.slice(0, limit), hasMore: true };
+  }
+  return { page: docs, hasMore: false };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -78,30 +198,6 @@ async function getBlockExclusionIds(
   viewerId: Types.ObjectId
 ): Promise<Types.ObjectId[]> {
   return getBlockedUserIds(viewerId.toString());
-}
-
-/**
- * Returns the accessible private author IDs: users this viewer follows or
- * shares a kitchen with. Does NOT load all public user IDs.
- */
-async function buildAccessiblePrivateIds(
-  userId: Types.ObjectId
-): Promise<Types.ObjectId[]> {
-  const followingIds = await getFollowingIds(userId);
-
-  const viewer = await User.findById(userId).select("kitchenId").lean();
-  let kitchenMemberIds: Types.ObjectId[] = [];
-  if (viewer?.kitchenId) {
-    const members = await User.find({
-      kitchenId: viewer.kitchenId,
-      _id: { $ne: userId },
-    })
-      .select("_id")
-      .lean();
-    kitchenMemberIds = members.map((m) => m._id);
-  }
-
-  return [...followingIds, ...kitchenMemberIds];
 }
 
 /**
@@ -207,6 +303,7 @@ async function enrichRecipes(
       isPrivate: recipe.isPrivate,
       likesCount: recipe.likesCount,
       forksCount: recipe.forksCount,
+      commentsCount: recipe.commentsCount ?? 0,
       createdAt: recipe.createdAt,
       updatedAt: recipe.updatedAt,
       authorName: author?.fullName ?? "Unknown",
@@ -349,9 +446,16 @@ export async function forYouFeed(
         : { $ne: userId },
   };
 
+  const candidateIds = await getForYouCandidateIds(
+    baseMatch,
+    userDietary,
+    userCuisine
+  );
+  const poolMatch = { _id: { $in: candidateIds } };
+
   // First pass: get maxEngagement for normalization
   const maxResult = await Recipe.aggregate([
-    { $match: baseMatch },
+    { $match: poolMatch },
     ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
     {
       $group: {
@@ -361,14 +465,14 @@ export async function forYouFeed(
         },
       },
     },
-  ] as unknown[] as PipelineStage[]);
+  ] as unknown[] as PipelineStage[]).allowDiskUse(true);
   const maxEngagement = Math.max(1, (maxResult[0]?.max as number) ?? 0);
 
   // Second pass: score in aggregation and paginate
   const nowMs = Date.now();
 
   const pipeline = [
-    { $match: baseMatch },
+    { $match: poolMatch },
     ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
     // Join author for premium status
     {
@@ -512,12 +616,11 @@ export async function forYouFeed(
     // Real (non-seed) recipes rank ahead of seed recipes, then by score.
     // `isSeed` sorts ascending: missing/false (real) before true (seed).
     { $sort: { isSeed: 1, _score: -1 } },
-    // Paginate via $facet
     {
       $facet: {
         data: [
           { $skip: skip },
-          { $limit: limit },
+          { $limit: limit + 1 },
           {
             $project: {
               _daysSince: 0,
@@ -531,17 +634,18 @@ export async function forYouFeed(
             },
           },
         ],
-        total: [{ $count: "n" }],
+        count: [{ $limit: 1000 }, { $count: "n" }],
       },
     },
   ];
 
   const [[result], featured] = await Promise.all([
-    Recipe.aggregate(pipeline as unknown as PipelineStage[]),
+    Recipe.aggregate(pipeline as unknown as PipelineStage[]).allowDiskUse(true),
     featuredPromise,
   ]);
-  const recipes = (result?.data ?? []) as LeanRecipe[];
-  const baseTotal = (result?.total[0]?.n ?? 0) as number;
+  const rawData = (result?.data ?? []) as LeanRecipe[];
+  const { page: recipes, hasMore: hasMoreRaw } = splitHasMore(rawData, limit);
+  const baseTotal = (result?.count[0]?.n ?? 0) as number;
 
   const enrichedBase = await enrichRecipes(recipes, userId);
   const { recipes: finalRecipes, total } = applyFeaturedToPage(
@@ -557,11 +661,9 @@ export async function forYouFeed(
     limit,
     total,
     totalPages: Math.ceil(total / limit),
+    hasMore: hasMoreRaw,
   };
 }
-
-const TRENDING_HALF_LIFE_DAYS = 14;
-const TRENDING_DECAY_RATE = Math.LN2 / TRENDING_HALF_LIFE_DAYS;
 
 /**
  * Trending feed — most-engaged recipes from the last 7 days.
@@ -588,48 +690,64 @@ export async function trendingFeed(
         : { $ne: userId },
   };
 
+  const { ids: candidateIds, materialized } = await getTrendingCandidateIds(
+    baseMatch
+  );
+  const poolMatch = { _id: { $in: candidateIds } };
+
+  const scoringStages: Record<string, unknown>[] = materialized
+    ? [{ $sort: { isSeed: 1, trendingScore: -1 } }]
+    : [
+        {
+          $addFields: {
+            _ageDays: {
+              $divide: [
+                { $subtract: [new Date(nowMs), "$createdAt"] },
+                1000 * 60 * 60 * 24,
+              ],
+            },
+          },
+        },
+        {
+          $addFields: {
+            _trendScore: {
+              $multiply: [
+                { $add: ["$likesCount", { $multiply: ["$forksCount", 3] }] },
+                { $exp: { $multiply: ["$_ageDays", -TRENDING_DECAY_RATE] } },
+              ],
+            },
+          },
+        },
+        // Real (non-seed) recipes rank ahead of seed recipes, then by engagement.
+        { $sort: { isSeed: 1, _trendScore: -1 } },
+      ];
+
+  const dataStages: Record<string, unknown>[] = [
+    { $skip: skip },
+    { $limit: limit + 1 },
+    ...(materialized
+      ? []
+      : [{ $project: { _ageDays: 0, _trendScore: 0 } }]),
+  ];
+
   const [[result], featured] = await Promise.all([
     Recipe.aggregate([
-      { $match: baseMatch },
+      { $match: poolMatch },
       ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
-      {
-        $addFields: {
-          _ageDays: {
-            $divide: [
-              { $subtract: [new Date(nowMs), "$createdAt"] },
-              1000 * 60 * 60 * 24,
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          _trendScore: {
-            $multiply: [
-              { $add: ["$likesCount", { $multiply: ["$forksCount", 3] }] },
-              { $exp: { $multiply: ["$_ageDays", -TRENDING_DECAY_RATE] } },
-            ],
-          },
-        },
-      },
-      // Real (non-seed) recipes rank ahead of seed recipes, then by engagement.
-      { $sort: { isSeed: 1, _trendScore: -1 } },
+      ...scoringStages,
       {
         $facet: {
-          data: [
-            { $skip: skip },
-            { $limit: limit },
-            { $project: { _ageDays: 0, _trendScore: 0 } },
-          ],
-          total: [{ $count: "n" }],
+          data: dataStages,
+          count: [{ $limit: 1000 }, { $count: "n" }],
         },
       },
-    ] as unknown as PipelineStage[]),
+    ] as unknown as PipelineStage[]).allowDiskUse(true),
     getFeaturedRecipeForViewer(userId, accessiblePrivateIds, blockExclusionIds),
   ]);
 
-  const recipes = (result?.data ?? []) as LeanRecipe[];
-  const baseTotal = (result?.total[0]?.n ?? 0) as number;
+  const rawData = (result?.data ?? []) as LeanRecipe[];
+  const { page: recipes, hasMore: hasMoreRaw } = splitHasMore(rawData, limit);
+  const baseTotal = (result?.count[0]?.n ?? 0) as number;
 
   const enrichedBase = await enrichRecipes(recipes, userId);
   const { recipes: finalRecipes, total } = applyFeaturedToPage(
@@ -645,6 +763,7 @@ export async function trendingFeed(
     limit,
     total,
     totalPages: Math.ceil(total / limit),
+    hasMore: hasMoreRaw,
   };
 }
 
@@ -685,6 +804,7 @@ export async function friendsFeed(
       limit,
       total,
       totalPages: Math.ceil(total / limit),
+      hasMore: false,
     };
   }
 
@@ -722,6 +842,7 @@ export async function friendsFeed(
     limit,
     total,
     totalPages: Math.ceil(total / limit),
+    hasMore: skip + recipes.length < baseTotal,
   };
 }
 
@@ -757,31 +878,31 @@ export async function seasonalFeed(
         : { $ne: userId },
   };
 
-  if (activeTags.length > 0) {
-    const slugs = activeTags.map((t) => t.slug);
-    baseMatch.labels = { $in: slugs };
-  }
   // No active seasonal tags: fall back to the full visible catalog rather than
   // an empty feed. The sort below still ranks user recipes ahead of seed.
+  const activeSlugs = activeTags.map((t) => t.slug);
+  const candidateIds = await getSeasonalCandidateIds(baseMatch, activeSlugs);
+  const poolMatch = { _id: { $in: candidateIds } };
 
   const [[result], featured] = await Promise.all([
     Recipe.aggregate([
-      { $match: baseMatch },
+      { $match: poolMatch },
       ...buildVisibilityPipelineStages(userId, accessiblePrivateIds),
       // Real (non-seed) recipes rank ahead of seed recipes.
       { $sort: { isSeed: 1, likesCount: -1, createdAt: -1 } },
       {
         $facet: {
-          data: [{ $skip: skip }, { $limit: limit }],
-          total: [{ $count: "n" }],
+          data: [{ $skip: skip }, { $limit: limit + 1 }],
+          count: [{ $limit: 1000 }, { $count: "n" }],
         },
       },
-    ] as unknown as PipelineStage[]),
+    ] as unknown as PipelineStage[]).allowDiskUse(true),
     getFeaturedRecipeForViewer(userId, accessiblePrivateIds, blockExclusionIds),
   ]);
 
-  const recipes = (result?.data ?? []) as LeanRecipe[];
-  const baseTotal = (result?.total[0]?.n ?? 0) as number;
+  const rawData = (result?.data ?? []) as LeanRecipe[];
+  const { page: recipes, hasMore: hasMoreRaw } = splitHasMore(rawData, limit);
+  const baseTotal = (result?.count[0]?.n ?? 0) as number;
 
   const enrichedBase = await enrichRecipes(recipes, userId);
   const { recipes: finalRecipes, total } = applyFeaturedToPage(
@@ -797,5 +918,6 @@ export async function seasonalFeed(
     limit,
     total,
     totalPages: Math.ceil(total / limit),
+    hasMore: hasMoreRaw,
   };
 }

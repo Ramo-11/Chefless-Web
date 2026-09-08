@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Types } from "mongoose";
 import Notification from "../../models/Notification";
 import User from "../../models/User";
@@ -65,6 +65,131 @@ describe("notification-service", () => {
     expect(notification).not.toBeNull();
     expect(notification?.recipeTitle).toBe("Chicken Kabsa");
     expect(notification?.shareMessage).toBe("You should try this on Friday.");
+  });
+
+  describe("comment notification routes", () => {
+    beforeEach(() => {
+      sendPushNotificationMock.mockReset();
+      sendPushNotificationMock.mockResolvedValue(undefined);
+    });
+
+    async function recipientWithToken(language?: string) {
+      const recipient = await createTestUser();
+      await User.updateOne(
+        { _id: recipient._id },
+        { $set: { fcmToken: "token-abc", ...(language ? { language } : {}) } }
+      );
+      return recipient;
+    }
+
+    function lastPushData(): Record<string, string> {
+      const call = sendPushNotificationMock.mock.calls.at(-1);
+      return call?.[3] as Record<string, string>;
+    }
+
+    it("routes a recipe comment to that recipe's comment thread", async () => {
+      const recipient = await recipientWithToken();
+      const recipeId = new Types.ObjectId();
+      const commentId = new Types.ObjectId();
+
+      await createNotification({
+        userId: recipient._id,
+        type: "recipe_commented",
+        actorName: "Sarah",
+        recipeId,
+        recipeTitle: "Kabsa",
+        commentId,
+        pushTitle: "New comment",
+        pushBody: "Sarah commented.",
+      });
+
+      expect(lastPushData().route).toBe(
+        `/comments/recipe/${recipeId.toString()}?commentId=${commentId.toString()}`
+      );
+    });
+
+    it("routes a cooked post comment to the post's thread, not the recipe's", async () => {
+      const recipient = await recipientWithToken();
+      const recipeId = new Types.ObjectId();
+      const cookedPostId = new Types.ObjectId();
+      const commentId = new Types.ObjectId();
+
+      await createNotification({
+        userId: recipient._id,
+        type: "cooked_post_commented",
+        actorName: "Sarah",
+        recipeId,
+        recipeTitle: "Kabsa",
+        cookedPostId,
+        commentId,
+        pushTitle: "New comment",
+        pushBody: "Sarah commented.",
+      });
+
+      const route = lastPushData().route;
+      expect(route).toBe(
+        `/comments/cooked_post/${cookedPostId.toString()}?commentId=${commentId.toString()}`
+      );
+      expect(route).not.toContain(recipeId.toString());
+    });
+
+    it("routes a reply on a cooked post to the post's thread", async () => {
+      const recipient = await recipientWithToken();
+      const cookedPostId = new Types.ObjectId();
+      const parentCommentId = new Types.ObjectId();
+
+      await createNotification({
+        userId: recipient._id,
+        type: "comment_reply",
+        actorName: "Sarah",
+        recipeTitle: "Kabsa",
+        cookedPostId,
+        commentId: parentCommentId,
+        pushTitle: "New reply",
+        pushBody: "Sarah replied.",
+      });
+
+      expect(lastPushData().route).toBe(
+        `/comments/cooked_post/${cookedPostId.toString()}?commentId=${parentCommentId.toString()}`
+      );
+    });
+
+    it("falls back to the notifications feed when no target survives", async () => {
+      const recipient = await recipientWithToken();
+
+      await createNotification({
+        userId: recipient._id,
+        type: "comment_reply",
+        actorName: "Sarah",
+        commentId: new Types.ObjectId(),
+        pushTitle: "New reply",
+        pushBody: "Sarah replied.",
+      });
+
+      expect(lastPushData().route).toBe("/notifications");
+    });
+
+    it("sends comment push copy in the recipient's language", async () => {
+      const recipient = await recipientWithToken("es");
+
+      await createNotification({
+        userId: recipient._id,
+        type: "recipe_commented",
+        actorName: "Sarah",
+        recipeId: new Types.ObjectId(),
+        recipeTitle: "Kabsa",
+        commentId: new Types.ObjectId(),
+        pushArgs: { commentPreview: "Se ve delicioso" },
+        pushTitle: "New comment",
+        pushBody: "Sarah commented.",
+      });
+
+      const call = sendPushNotificationMock.mock.calls.at(-1);
+      expect(call?.[1]).toBe("Nuevo comentario");
+      expect(call?.[2]).toBe(
+        'Sarah comentó en tu receta "Kabsa": Se ve delicioso'
+      );
+    });
   });
 
   it("clears only the selected notifications when ids are provided", async () => {
